@@ -73,6 +73,10 @@ nav.bottom button.on{color:var(--cloth)}
 .as-purple{background:#EDE4F7;color:#6B3FA0}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;font-weight:700;font-size:15px;padding:12px 16px;border-radius:12px;transition:.12s;width:100%}
 .btn:active{transform:scale(.98)}
+.tap-ripple{position:absolute;border-radius:50%;background:currentColor;opacity:.18;transform:scale(0);animation:tapRipple .45s cubic-bezier(.2,.6,.3,1);pointer-events:none}
+@keyframes tapRipple{to{transform:scale(2.4);opacity:0}}
+.tabs button,.chip,.hdr-gear,#nav button,.sheet-x{transition:transform .1s ease}
+.tabs button:active,.chip:active,#nav button:active,.hdr-gear:active,.sheet-x:active{transform:scale(.93)}
 .btn-primary{background:var(--cloth);color:#fff}
 .btn-tape{background:var(--tape);color:#3a2803}
 .btn-ghost{background:var(--muslin);color:var(--ink);border:1px solid var(--line)}
@@ -893,6 +897,24 @@ function dongTienTheoThang(keys){const vao={},ra={};keys.forEach(k=>{vao[k]=0;ra
   DB.butToan.forEach(bt=>{const k=ymKey(bt.thoiDiem);if(!(k in vao))return;
     bt.dong.forEach(d=>{if(d.tk!==TK.QUY)return;if(d.chieu==='NO')vao[k]+=d.soTien;else ra[k]+=d.soTien;});});
   return {vao:keys.map(k=>vao[k]),ra:keys.map(k=>ra[k])};}
+/* ---- biểu đồ theo NGÀY (thêm; bản theo tháng ở trên giữ nguyên) ---- */
+function dayKey(ts){const d=new Date(ts);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function dayLabel(k){const p=k.split('-');return (+p[2])+'/'+(+p[1]);}
+function ngayGanDay(n){const out=[],b=new Date();b.setHours(0,0,0,0);for(let i=n-1;i>=0;i--){const d=new Date(b);d.setDate(b.getDate()-i);out.push(dayKey(d.getTime()));}return out;}
+function weekKey(ts){const d=new Date(ts);d.setHours(0,0,0,0);const g=(d.getDay()+6)%7;d.setDate(d.getDate()-g);return dayKey(d.getTime());}
+function weekLabel(k){return dayLabel(k);}
+function tuanGanDay(n){const out=[],b=new Date();b.setHours(0,0,0,0);const g=(b.getDay()+6)%7;b.setDate(b.getDate()-g);for(let i=n-1;i>=0;i--){const d=new Date(b);d.setDate(b.getDate()-i*7);out.push(dayKey(d.getTime()));}return out;}
+function laiTheo(keys,keyFn){keyFn=keyFn||ymKey;const m={};keys.forEach(k=>m[k]=0);
+  DB.butToan.forEach(bt=>{const k=keyFn(bt.thoiDiem);if(!(k in m))return;
+    bt.dong.forEach(d=>{
+      if(d.tk===TK.DOANH_THU)m[k]+=(d.chieu==='CO'?d.soTien:-d.soTien);
+      else if(d.tk===TK.GIA_VON)m[k]-=(d.chieu==='NO'?d.soTien:-d.soTien);
+      else if(d.tk===TK.LO_KHAC)m[k]-=(d.chieu==='NO'?d.soTien:-d.soTien);});});
+  return keys.map(k=>m[k]);}
+function dongTienTheo(keys,keyFn){keyFn=keyFn||ymKey;const vao={},ra={};keys.forEach(k=>{vao[k]=0;ra[k]=0;});
+  DB.butToan.forEach(bt=>{const k=keyFn(bt.thoiDiem);if(!(k in vao))return;
+    bt.dong.forEach(d=>{if(d.tk!==TK.QUY)return;if(d.chieu==='NO')vao[k]+=d.soTien;else ra[k]+=d.soTien;});});
+  return {vao:keys.map(k=>vao[k]),ra:keys.map(k=>ra[k])};}
 /* groups: mảng theo cột, mỗi cột là mảng {v,color}; showVal: ghi số trên đầu cột (1 cột 1 cây) */
 function svgChart(labels,groups,opts){opts=opts||{};
   const W=340,H=opts.h||132,padT=opts.showVal?16:8,padB=20,padX=8;
@@ -968,15 +990,15 @@ function homeBody(){
   h+=`</div>`;
 
   // Tháng này + biểu đồ lãi
-  const keys=thangGanDay(6);const laiS=laiTheoThang(keys);const labels=keys.map(ymLabel);
+  const keys=ngayGanDay(7);const laiS=laiTheo(keys,dayKey);const labels=keys.map(dayLabel);
   const groups=laiS.map(v=>[{v,color:v>=0?'#2F7A63':'#C0392B'}]);
   h+=`<div class="section-h">Tháng này</div><div class="card"><div class="card-pad">
     <div class="kv"><div class="k">Lãi ròng ghi nhận</div><div class="v big-num ${laiThangNay>=0?'money-pos':'money-neg'}">${fmt(laiThangNay)}</div></div>
     <div class="kv"><div class="k">Tiền vào két</div><div class="v money-pos">+ ${fmtShort(vaoThang)}</div></div>
     <div class="kv"><div class="k">Tiền ra khỏi két</div><div class="v money-neg">− ${fmtShort(raThang)}</div></div></div></div>`;
-  h+=`<div class="section-h">Lãi 6 tháng gần đây</div><div class="card"><div class="card-pad">
+  h+=`<div class="section-h">Lãi 7 ngày gần đây</div><div class="card"><div class="card-pad">
     ${svgChart(labels,groups,{showVal:true,h:140})}
-    <div class="hint" style="text-align:center;margin-top:4px">Biểu đồ đầy dần theo từng tháng bạn dùng app.</div></div></div>`;
+    <div class="hint" style="text-align:center;margin-top:4px">7 ngày gần nhất — số lấy từ nhật ký, không nhập tay.</div></div></div>`;
   return h;
 }
 
@@ -1856,8 +1878,9 @@ function doDaoOp(key){const ly=((el('op_ly')&&el('op_ly').value)||'').trim();if(
 
 /* ---------- TỔNG QUAN (gộp Hôm nay + Thu/Chi + Lợi nhuận) ---------- */
 let tqTab='home';
+let xhMode='thang'; /* biểu đồ: 'thang' | 'ngay' */
 const TQ_MAIN=[['home','Hôm nay'],['laitien','Lãi & Tiền'],['them','Thêm']];
-const TQ_HIDDEN={nhatky:'Nhật ký nhập',thuchi:'Thu / Chi & dòng tiền',xuhuong:'Xu hướng 6 tháng',khoaky:'Khóa kỳ'};
+const TQ_HIDDEN={nhatky:'Nhật ký nhập',thuchi:'Thu / Chi & dòng tiền',xuhuong:'Biểu đồ',khoaky:'Khóa kỳ'};
 function viewTongQuan(m){
   if(!TQ_MAIN.some(s=>s[0]===tqTab)&&!(tqTab in TQ_HIDDEN))tqTab='home';
   const hidden=(tqTab in TQ_HIDDEN);
@@ -1878,7 +1901,7 @@ function bcThem(){
   const items=[
     ['nhatky','🗒️','Nhật ký nhập','Xem lại từng lần nhập · hoàn tác, sửa'],
     ['thuchi','💵','Thu / Chi & dòng tiền','Giao dịch tiền · tiền gối · WIP'],
-    ['xuhuong','📈','Xu hướng 6 tháng','Lãi và dòng tiền theo tháng'],
+    ['xuhuong','📈','Biểu đồ','Lãi và dòng tiền theo ngày/tháng'],
     ['khoaky','🔒','Khóa kỳ','Chốt chi phí chung cuối kỳ']];
   let h=`<div class="card">`+items.map(([k,ic,t,s])=>`<div class="slip" onclick="tqTab='${k}';render()">
     <div style="display:flex;gap:11px;align-items:flex-start"><div style="font-size:18px;line-height:1.2">${ic}</div>
@@ -1931,21 +1954,26 @@ function bcLai(){
   return h;
 }
 function bcXuHuong(){
-  const keys=thangGanDay(6);const labels=keys.map(ymLabel);
-  const lai=laiTheoThang(keys);const {vao,ra}=dongTienTheoThang(keys);
+  const mode=xhMode;const soNgay=14;const soTuan=8;
+  const keys=mode==='ngay'?ngayGanDay(soNgay):mode==='tuan'?tuanGanDay(soTuan):thangGanDay(6);
+  const keyFn=mode==='ngay'?dayKey:mode==='tuan'?weekKey:ymKey;
+  const labels=mode==='ngay'?keys.map((k,i)=>(i%3===0||i===keys.length-1)?dayLabel(k):''):mode==='tuan'?keys.map(weekLabel):keys.map(ymLabel);
+  const kyTxt=mode==='ngay'?soNgay+' ngày':mode==='tuan'?soTuan+' tuần':'6 tháng';
+  const donVi=mode==='ngay'?'ngày':mode==='tuan'?'tuần':'tháng';
+  const lai=laiTheo(keys,keyFn);const {vao,ra}=dongTienTheo(keys,keyFn);
   const tongLai=sum(lai),tongVao=sum(vao),tongRa=sum(ra);
   const laiGroups=lai.map(v=>[{v,color:v>=0?'#2F7A63':'#C0392B'}]);
   const dtGroups=keys.map((k,i)=>[{v:vao[i],color:'#2F7A63'},{v:ra[i],color:'#C0392B'}]);
   const byMau={};DB.don.filter(d=>bal(TK.DOANH_THU,x=>x.donId===d.id).co>0).forEach(d=>{byMau[d.mauId]=(byMau[d.mauId]||0)+laiDon(d).lai;});
   const topMau=Object.entries(byMau).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const maxMau=Math.max(1,...topMau.map(([,v])=>Math.abs(v)));
-  let h=`<div class="section-h" style="margin-top:2px">Lãi ròng theo tháng</div><div class="card"><div class="card-pad">
-    ${svgChart(labels,laiGroups,{showVal:true,h:150})}
-    <div class="kv" style="margin-top:8px"><div class="k">Tổng 6 tháng</div><div class="v big-num ${tongLai>=0?'money-pos':'money-neg'}">${fmt(tongLai)}</div></div></div></div>`;
-  h+=`<div class="section-h">Dòng tiền vào / ra theo tháng</div><div class="card"><div class="card-pad">
+  let h=`<div class="tabs" style="margin-bottom:12px"><button class="${mode==='ngay'?'on':''}" onclick="xhMode='ngay';render()">Ngày</button><button class="${mode==='tuan'?'on':''}" onclick="xhMode='tuan';render()">Tuần</button><button class="${mode==='thang'?'on':''}" onclick="xhMode='thang';render()">Tháng</button></div><div class="section-h" style="margin-top:2px">Lãi ròng theo ${donVi}</div><div class="card"><div class="card-pad">
+    ${svgChart(labels,laiGroups,{showVal:mode!=='ngay',h:150})}
+    <div class="kv" style="margin-top:8px"><div class="k">Tổng ${kyTxt}</div><div class="v big-num ${tongLai>=0?'money-pos':'money-neg'}">${fmt(tongLai)}</div></div></div></div>`;
+  h+=`<div class="section-h">Dòng tiền vào / ra theo ${donVi}</div><div class="card"><div class="card-pad">
     ${svgChart(labels,dtGroups,{h:150})}
     ${chartLegend([{name:'Tiền vào',color:'#2F7A63'},{name:'Tiền ra',color:'#C0392B'}])}
-    <div class="kv" style="margin-top:8px"><div class="k">Vào − ra (6 tháng)</div><div class="v big-num ${(tongVao-tongRa)>=0?'money-pos':'money-neg'}">${fmt(tongVao-tongRa)}</div></div></div></div>`;
+    <div class="kv" style="margin-top:8px"><div class="k">Vào − ra (${kyTxt})</div><div class="v big-num ${(tongVao-tongRa)>=0?'money-pos':'money-neg'}">${fmt(tongVao-tongRa)}</div></div></div></div>`;
   h+=`<div class="section-h">Mẫu đóng góp lãi nhiều nhất</div><div class="card"><div class="card-pad">`;
   h+=topMau.length?topMau.map(([id,v])=>{const w=Math.round(Math.abs(v)/maxMau*100);
     return `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
@@ -1953,7 +1981,7 @@ function bcXuHuong(){
       <div style="height:8px;background:var(--line-2);border-radius:5px;overflow:hidden"><div style="height:100%;width:${w}%;background:${v>=0?'#2F7A63':'#C0392B'};border-radius:5px"></div></div></div>`;}).join('')
     :`<div class="divider-note">Chưa có đơn giao hàng.</div>`;
   h+=`</div></div>`;
-  h+=`<div class="hint" style="text-align:center">Số theo tháng lịch, lấy thẳng từ nhật ký bút toán — không nhập tay.</div>`;
+  h+=`<div class="hint" style="text-align:center">Số theo ${mode==='ngay'?'từng ngày':mode==='tuan'?'từng tuần':'tháng lịch'}, lấy thẳng từ nhật ký bút toán — không nhập tay.</div>`;
   return h;
 }
 function bcCauNoi(){
@@ -2091,6 +2119,7 @@ function modalCaiDat(){
     <div style="height:10px"></div>
     <button class="btn btn-tape" onclick="moKetNoiDamMay()">${cloudOn()?'⛭ Quản lý đồng bộ':'☁ Bật đồng bộ đám mây'}</button>
     <div class="hint" style="margin:8px 0 0">Cho nhiều máy dùng chung một sổ. Cần một dự án Supabase (miễn phí).</div></div></div>`;
+  h+=`<div class="section-h">Âm thanh & chạm</div><div class="card"><div class="card-pad"><div class="kv"><div class="k">Tiếng khi chạm nút</div><div class="v">${sfxOn()?'Bật 🔊':'Tắt 🔇'}</div></div><div style="height:10px"></div><button class="btn btn-ghost" onclick="toggleSfx()">${sfxOn()?'🔇 Tắt tiếng chạm':'🔊 Bật tiếng chạm'}</button><div class="hint" style="margin:8px 0 0">Có gợn sóng khi chạm nút; mục này chỉ bật/tắt tiếng. Lưu riêng theo máy.</div></div></div>`;
   h+=`<div class="section-h">Mẫu & bảng giá</div><div class="card"><div class="card-pad">
     <div class="hint" style="margin:0">Mỗi chủ hàng có mẫu, cỡ và giá riêng. Vào tab <b>Chủ hàng</b> → chọn chủ hàng để thêm/sửa mẫu.</div></div></div>`;
   h+=`<div class="section-h">Số dư đầu kỳ</div><div class="card"><div class="card-pad">
@@ -2253,6 +2282,31 @@ function toastUndo(msg){
 function undoTuToast(key){hoanTacOp(key,'');el('toast').className='toast';if(el('scrim').classList.contains('on'))closeSheet();render();toast('Đã hoàn tác.');}
 
 /* ---------- Khởi động ---------- */
+/* ---- Âm thanh & hiệu ứng khi chạm (lưu riêng theo máy: soxuong_sfx) ---- */
+function sfxOn(){return localStorage.getItem('soxuong_sfx')!=='0';}
+let _actx=null;
+function sfx(kind){ if(!sfxOn())return;
+  try{ _actx=_actx||new (window.AudioContext||window.webkitAudioContext)(); if(_actx.state==='suspended')_actx.resume();
+    const t=_actx.currentTime,o=_actx.createOscillator(),g=_actx.createGain(); o.connect(g);g.connect(_actx.destination);
+    const f=kind==='sel'?600:430; o.type='triangle'; o.frequency.setValueAtTime(f,t);
+    if(kind==='sel')o.frequency.exponentialRampToValueAtTime(f*1.5,t+0.07);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(kind==='sel'?0.16:0.11,t+0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+0.15); o.start(t); o.stop(t+0.17);
+  }catch(e){} }
+function toggleSfx(){const on=sfxOn(); localStorage.setItem('soxuong_sfx',on?'0':'1'); if(!on)sfx('sel'); modalCaiDat();}
+function _tapRipple(node,x,y){ try{ const r=node.getBoundingClientRect(),sz=Math.max(r.width,r.height);
+    const s=document.createElement('span'); s.className='tap-ripple'; s.style.width=s.style.height=sz+'px';
+    s.style.left=(x-r.left-sz/2)+'px'; s.style.top=(y-r.top-sz/2)+'px';
+    if(getComputedStyle(node).position==='static')node.style.position='relative'; node.style.overflow='hidden';
+    node.appendChild(s); setTimeout(function(){s.remove();},480);
+  }catch(e){} }
+document.addEventListener('pointerdown',function(e){
+  const tgt=e.target.closest?e.target.closest('.btn,.tabs button,#nav button,.chip,.hdr-gear,.sheet-x,.gate-btn,.order-card,.slip'):null;
+  if(!tgt)return;
+  const pick=tgt.matches('.tabs button,#nav button,.chip');
+  sfx(pick?'sel':'tap');
+  if(tgt.matches('.btn,.tabs button,#nav button,.chip,.hdr-gear,.sheet-x,.gate-btn'))_tapRipple(tgt,e.clientX,e.clientY);
+},true);
 function loadLocalOrSeed(){const saved=Store.load();window._cuMoi=false;
   if(saved&&saved.don&&saved.schema===SCHEMA){DB=saved;if(!DB.settings)DB.settings={tyLeChung:0.15,view:'don'};
     DB.phienGio=DB.phienGio||[];DB.phieuThao=DB.phieuThao||[];cur=DB.settings.view||'don';}
