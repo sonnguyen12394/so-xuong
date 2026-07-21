@@ -302,7 +302,8 @@ function bal(tk,filter){let no=0,co=0;
 
 /* ---------- tiện ích ---------- */
 function uid(){return Math.random().toString(36).slice(2,10)}
-function now(){return Date.now()}
+let SEED_CLOCK=null; // demo: giả lập ngày khi tạo dữ liệu mẫu; ngoài ra null → giờ thật
+function now(){return SEED_CLOCK!=null?SEED_CLOCK:Date.now()}
 function fmt(n){n=Math.round(n);const s=Math.abs(n).toLocaleString('vi-VN');return (n<0?'−':'')+s+' đ'}
 function fmtShort(n){n=Math.round(n);const a=Math.abs(n);let s;if(a>=1e6)s=(a/1e6).toFixed(a>=1e7?0:1).replace('.',',')+'tr';else if(a>=1e3)s=Math.round(a/1e3)+'k';else s=a+'';return (n<0?'−':'')+s}
 function sepStr(v){v=(''+(v==null?'':v)).replace(/[^\d]/g,'');return v?(+v).toLocaleString('vi-VN'):'';}
@@ -319,17 +320,33 @@ const getDon=id=>DB.don.find(d=>d.id===id);
 const owner=()=>DB.tho.find(t=>t.isOwner);
 
 /* ---------- tồn theo công đoạn × size ---------- */
+/* Phiếu giao có thể ôm MỘT DẢI công đoạn liền nhau [cdFrom..cdTo] (gói công đoạn).
+   Phiếu cũ chỉ có congDoanIdx → tự quy về from=to=congDoanIdx (không vỡ dữ liệu). */
+function pFrom(p){return p.cdFrom!==undefined?p.cdFrom:(p.congDoanIdx!==undefined?p.congDoanIdx:0);}
+function pTo(p){return p.cdTo!==undefined?p.cdTo:pFrom(p);}
+/* điểm-đến của một ĐỢT nhận về: mặc định = cuối gói (làm xong hết dải).
+   Nhỏ hơn cdTo = hàng mới xong tới bước 'den', sẽ đáp về chờ ở bước den+1
+   để giao tiếp cho người khác; thợ chỉ nhận công các bước cdFrom..den. */
+function batchDen(p,x){return (x&&x.den!==undefined)?x.den:pTo(p);}
+function donGiaSub(don,a,b){let s=0;for(let i=a;i<=b;i++)s+=(don.snapshotCD[i]?don.snapshotCD[i].donGia:0);return s;}
+function tenDaiSub(don,a,b){const A=don.snapshotCD[a]?don.snapshotCD[a].ten:'?';if(a>=b)return A;const B=don.snapshotCD[b]?don.snapshotCD[b].ten:'?';return A+' → '+B;}
+function donGiaDai(don,p){return donGiaSub(don,pFrom(p),pTo(p));}
+function tenDai(don,p){return tenDaiSub(don,pFrom(p),pTo(p));}
 function chamVeSize(don,s){return sum((don.chamList||[]).filter(c=>c.veRoi).map(c=>c.veSizes[s]||0))}
+/* số 'đạt' của mọi đợt nhận có điểm-đến = n-1 → đáp vào tồn ở bước n.
+   Dữ liệu cũ không có 'den' nên batchDen = cuối gói (pTo): hành vi y hệt trước. */
+function datVaoBuoc(don,n,size){let t=0;
+  for(const p of DB.phieuGiao){if(p.donId!==don.id||p.trangThai==='HUY')continue;
+    for(const x of p.dongNhan){if(batchDen(p,x)===n-1)t+=(x.dat&&x.dat[size])||0;}}
+  return t;}
 function sanXuatVao(don,n,size){
   if(n===0) return (don.sizes[size]||0)+chamVeSize(don,size);
-  return sum(DB.phieuGiao.filter(p=>p.donId===don.id&&p.congDoanIdx===n-1&&p.trangThai!=='HUY')
-    .map(p=>pDatSize(p,size)));
+  return datVaoBuoc(don,n,size);
 }
-function daGiaoRaCD(don,n,size){return sum(DB.phieuGiao.filter(p=>p.donId===don.id&&p.congDoanIdx===n&&p.trangThai!=='HUY').map(p=>pGiaoSize(p,size)))}
+function daGiaoRaCD(don,n,size){return sum(DB.phieuGiao.filter(p=>p.donId===don.id&&pFrom(p)===n&&p.trangThai!=='HUY').map(p=>pGiaoSize(p,size)))}
 function ton(don,n,size){return sanXuatVao(don,n,size)-daGiaoRaCD(don,n,size)}
 function tonCD(don,n){return sum(sizesOf(don).map(s=>Math.max(0,ton(don,n,s))))}
-function xong(don,size){const last=don.snapshotCD.length-1;
-  return sum(DB.phieuGiao.filter(p=>p.donId===don.id&&p.congDoanIdx===last&&p.trangThai!=='HUY').map(p=>pDatSize(p,size)))}
+function xong(don,size){const last=don.snapshotCD.length-1;return datVaoBuoc(don,last+1,size);}
 function daGiaoTP(don,size){return sum(DB.giaoTP.filter(g=>g.donId===don.id).map(g=>g.sizes[size]||0))}
 function coTheGiao(don,size){return xong(don,size)-daGiaoTP(don,size)}
 function coTheGiaoTong(don){return sum(sizesOf(don).map(s=>Math.max(0,coTheGiao(don,s))))}
@@ -352,15 +369,23 @@ function taoDon({chuHangId,mauId,ma,sizes,giaGiaCong}){
     gioDinhMuc:mau.gioDinhMuc||0,chamList:[],trangThai:'DANG_CHAY'};
   DB.don.push(don);Store.save();return don;
 }
-/* giao: {S:10,M:20,...} — một phiếu có thể gồm nhiều cỡ */
-function giaoViec({donId,congDoanIdx,thoId,giao}){
-  const don=getDon(donId);const g={};
+/* giao: {S:10,M:20,...} — một phiếu có thể gồm nhiều cỡ VÀ một DẢI công đoạn liền nhau.
+   Một thợ nhận gói [cdFrom..cdTo], làm hết dải rồi trả về một lần. Hàng lấy từ tồn ở
+   công đoạn ĐẦU dải (cdFrom); khi nhận về, thành phẩm nằm sau cdTo. */
+function giaoViec({donId,cdFrom,cdTo,congDoanIdx,thoId,giao}){
+  const don=getDon(donId);
+  if(cdFrom===undefined)cdFrom=(congDoanIdx!==undefined?congDoanIdx:0);
+  if(cdTo===undefined)cdTo=cdFrom;
+  if(cdFrom>cdTo){const t=cdFrom;cdFrom=cdTo;cdTo=t;}
+  const nCD=don.snapshotCD.length;
+  if(cdFrom<0||cdTo>=nCD) throw new Error('Công đoạn không hợp lệ.');
+  const g={};
   for(const s of Object.keys(giao||{})){const q=giao[s]||0;if(q<=0)continue;
-    const conlai=ton(don,congDoanIdx,s);
-    if(q>conlai) throw new Error('Cỡ '+s+' chỉ còn '+conlai+' cái ở công đoạn này. Không giao '+q+'.');
+    const conlai=ton(don,cdFrom,s);
+    if(q>conlai) throw new Error('Cỡ '+s+' chỉ còn '+conlai+' cái ở công đoạn '+(cdFrom+1)+'. Không giao '+q+'.');
     g[s]=q;}
   if(!sum(Object.values(g))) throw new Error('Chưa chọn cỡ nào để giao.');
-  DB.phieuGiao.push({id:uid(),donId,congDoanIdx,thoId,giao:g,dongNhan:[],trangThai:'MO',ngay:now()});
+  DB.phieuGiao.push({id:uid(),donId,cdFrom,cdTo,thoId,giao:g,dongNhan:[],trangThai:'MO',ngay:now()});
   Store.save();
 }
 function hapThuChung(donId,tienCong){
@@ -368,18 +393,30 @@ function hapThuChung(donId,tienCong){
   if(cpc>0) ghi('Chi phí chung phân bổ',[
     {tk:TK.WIP,chieu:'NO',soTien:cpc,donId},{tk:TK.RO_CHUNG,chieu:'CO',soTien:cpc}]);
 }
-function nhanVe({phieuId,dat,phe}){beginOp();
+/* Một lần nhận có thể gồm nhiều ĐỢT khác điểm-đến:
+   - {phieuId,dat,phe}            → một đợt, xong hết gói (den=cdTo) — như cũ.
+   - {phieuId,batches:[{dat,phe,den}]} → nhiều đợt, mỗi đợt có điểm-đến riêng.
+   Đợt có den<cdTo: hàng đáp về chờ ở bước den+1, thợ chỉ nhận công cdFrom..den. */
+function nhanVe({phieuId,dat,phe,den,batches}){beginOp();
   const p=DB.phieuGiao.find(x=>x.id===phieuId);const don=getDon(p.donId);
-  const cd=don.snapshotCD[p.congDoanIdx];const tho=getTho(p.thoId);
-  dat=dat||{};phe=phe||{};
-  const slDat=sum(Object.values(dat));
-  p.dongNhan.push({ngay:now(),dat:{...dat},phe:{...phe}});
-  const tienCong=slDat*cd.donGia;
+  const tho=getTho(p.thoId);
   const tkCong=tho.isOwner?TK.CONG_CHU_XUONG:TK.PHAI_TRA_THO;
-  ghi('Nhận hàng về ('+cd.ten+')',[
-    {tk:TK.WIP,chieu:'NO',soTien:tienCong,donId:don.id},
-    {tk:tkCong,chieu:'CO',soTien:tienCong,thoId:tho.isOwner?null:tho.id}]);
-  hapThuChung(don.id,tienCong);Store.save();
+  const list=(batches&&batches.length)?batches:[{dat:dat||{},phe:phe||{},den:den}];
+  for(const b of list){
+    const bdat=b.dat||{},bphe=b.phe||{};
+    if(sum(Object.values(bdat))+sum(Object.values(bphe))<=0)continue;
+    const d=(b.den!==undefined&&b.den!==null)?b.den:pTo(p);
+    const rec={ngay:now(),dat:{...bdat},phe:{...bphe}};
+    if(d!==pTo(p))rec.den=d;
+    p.dongNhan.push(rec);
+    const slDat=sum(Object.values(bdat));
+    const tienCong=slDat*donGiaSub(don,pFrom(p),d);
+    ghi('Nhận hàng về ('+tenDaiSub(don,pFrom(p),d)+')',[
+      {tk:TK.WIP,chieu:'NO',soTien:tienCong,donId:don.id},
+      {tk:tkCong,chieu:'CO',soTien:tienCong,thoId:tho.isOwner?null:tho.id}]);
+    hapThuChung(don.id,tienCong);
+  }
+  Store.save();
 }
 function dongPhieu({phieuId,lyDo}){
   const p=DB.phieuGiao.find(x=>x.id===phieuId);
@@ -609,12 +646,12 @@ function laiDon(don){
     chenh:bal(TK.GIA_VON,d=>d.donId===don.id&&d.loai==='CHENH_LECH').net};
 }
 function congThoDon(don){return sum(DB.phieuGiao.filter(p=>p.donId===don.id).map(p=>{
-  const t=getTho(p.thoId);if(t.isOwner)return 0;const cd=don.snapshotCD[p.congDoanIdx];
-  return pDat(p)*cd.donGia;}))
+  const t=getTho(p.thoId);if(t.isOwner)return 0;
+  return pDat(p)*donGiaDai(don,p);}))
   +sum(DB.phienGio.filter(pg=>pg.donId===don.id).map(pg=>pg.tien))}
 function congMinhDon(don){return sum(DB.phieuGiao.filter(p=>p.donId===don.id).map(p=>{
-  const t=getTho(p.thoId);if(!t.isOwner)return 0;const cd=don.snapshotCD[p.congDoanIdx];
-  return pDat(p)*cd.donGia;}))}
+  const t=getTho(p.thoId);if(!t.isOwner)return 0;
+  return pDat(p)*donGiaDai(don,p);}))}
 function chungDon(don){return Math.round((congThoDon(don)+congMinhDon(don))*DB.settings.tyLeChung)}
 function noChuHang(chuId){return bal(TK.PHAI_THU,d=>d.chuHangId===chuId).net}
 function luongNoTho(thoId){const b=bal(TK.PHAI_TRA_THO,d=>d.thoId===thoId);return b.co-b.no;}
@@ -675,10 +712,153 @@ function seed(){
   chiPhiXuong({soTien:700000,dienGiai:'Điện nước tháng'});
   DB.settings.view='tongquan';Store.save();
 }
-function doGiao(don,thoId,cdIdx,sizeMap){giaoViec({donId:don.id,congDoanIdx:cdIdx,thoId,giao:sizeMap});
+function doGiao(don,thoId,cdIdx,sizeMap,cdTo){giaoViec({donId:don.id,cdFrom:cdIdx,cdTo:(cdTo!==undefined?cdTo:cdIdx),thoId,giao:sizeMap});
   return DB.phieuGiao[DB.phieuGiao.length-1].id;}
 function runChain(don,steps){for(const [thoId,cdIdx,sizeMap] of steps){const pid=doGiao(don,thoId,cdIdx,sizeMap);
   const p=DB.phieuGiao.find(x=>x.id===pid);nhanVe({phieuId:pid,dat:{...p.giao}});dongPhieu({phieuId:pid,lyDo:null});}}
+/* ===========================================================
+   DỮ LIỆU DEMO — MỘT THÁNG VẬN HÀNH XƯỞNG (tự sinh qua chính
+   các hàm nghiệp vụ → bảo đảm Nợ=Có và "cầu nối" luôn tự cân).
+   Ngày được rải trong ~30 ngày gần nhất, tính lùi từ HÔM NAY,
+   nên biểu đồ theo tháng và cảnh báo "quá hạn" luôn đúng thực tế.
+   =========================================================== */
+function seedDemo(){
+  DB={schema:SCHEMA,chuHang:[],tho:[],don:[],phieuGiao:[],phienGio:[],phieuThao:[],giaoTP:[],butToan:[],
+    settings:{tyLeChung:0.15,view:'don',kyKhoa:false,lastBackup:null}};
+  DB.chuHang=[
+    {id:'c1',ten:'Chị Lan · shop online',mau:[
+      {id:'m1',ten:'Áo thun basic',sizeList:['S','M','L','XL'],giaGiaCong:9000,gioDinhMuc:0.3,congDoan:[
+        {ten:'May thân',donGia:2500},{ten:'May tay',donGia:1500},{ten:'Vắt sổ',donGia:1200},{ten:'Ủi · gấp',donGia:800}]}]},
+    {id:'c2',ten:'Anh Dũng · chợ Tân Bình',mau:[
+      {id:'m2',ten:'Đầm suông',sizeList:['S','M','L','XL'],giaGiaCong:16000,gioDinhMuc:0.6,congDoan:[
+        {ten:'Ráp thân',donGia:4000},{ten:'May tà',donGia:3000},{ten:'Làm khuy',donGia:2000},{ten:'Ủi · gấp',donGia:1500}]},
+      {id:'m3',ten:'Quần jogger',sizeList:['M','L','XL'],giaGiaCong:14000,gioDinhMuc:0.5,congDoan:[
+        {ten:'May thân',donGia:3500},{ten:'May lưng',donGia:2500},{ten:'Tra dây',donGia:1800},{ten:'Ủi · gấp',donGia:1200}]}]},
+    {id:'c3',ten:'Chị Hồng · sỉ Ninh Hiệp',mau:[
+      {id:'m4',ten:'Sơ mi công sở',sizeList:['S','M','L','XL'],giaGiaCong:15000,gioDinhMuc:0.7,congDoan:[
+        {ten:'Ráp thân',donGia:3000},{ten:'Tra tay',donGia:2200},{ten:'Làm cổ',donGia:2500},{ten:'Thùa khuy · đơm nút',donGia:1800},{ten:'Ủi · gấp',donGia:1500}]}]}
+  ];
+  DB.tho=[
+    {id:'t0',ten:'Tôi (chủ xưởng)',isOwner:true,loai:'sp'},
+    {id:'t1',ten:'Cô Bảy',loai:'sp'},
+    {id:'t2',ten:'Em Hà',loai:'sp'},
+    {id:'t3',ten:'Chú Tư',loai:'sp'},
+    {id:'t4',ten:'Chị Mai · ủi (tính giờ)',loai:'gio',donGiaGio:35000},
+    {id:'t5',ten:'Bé Linh · phụ việc',loai:'sp'}
+  ];
+
+  /* đồng hồ rải ngày: at(off) = "off ngày trước", giờ tuỳ chọn */
+  const DAY=86400000;const base=new Date();base.setHours(9,0,0,0);
+  const at=(off,h,m)=>{const d=new Date(base.getTime()-off*DAY);d.setHours(h==null?9:h,m||0,0,0);SEED_CLOCK=d.getTime();};
+  const P=id=>DB.phieuGiao.find(x=>x.id===id);
+
+  /* ---------- ĐẦU KỲ (off 30) ---------- */
+  at(30,8);
+  datSoDuDauKy({tienMat:5000000,chuNo:[{id:'c2',soTien:1500000}],thoNo:[{id:'t1',soTien:300000}]});
+  boVon({soTien:10000000,dienGiai:'Vốn lưu động đầu tháng'});
+  at(26,9);chiPhiXuong({soTien:500000,dienGiai:'Điện nước tháng'});
+
+  /* =========================================================
+     ĐƠN A · Áo thun (Chị Lan) — chạy trọn, đóng, thu một phần
+     → minh hoạ LÃI sạch, giao thành phẩm nhiều lần, gói công đoạn
+     ========================================================= */
+  at(29,8);const dA=taoDon({chuHangId:'c1',mauId:'m1',ma:'AT-2401',sizes:{S:60,M:120,L:90,XL:30},giaGiaCong:9000});
+  at(29,9);const pA0=doGiao(dA,'t1',0,{S:60,M:120,L:90,XL:30});           // Cô Bảy: may thân
+  at(28,16);nhanVe({phieuId:pA0,dat:{S:60,M:120,L:90,XL:30}});dongPhieu({phieuId:pA0,lyDo:null});
+  at(28,17);const pA1=doGiao(dA,'t2',1,{S:60,M:120,L:90,XL:30});          // Em Hà: may tay
+  at(27,16);nhanVe({phieuId:pA1,dat:{S:60,M:120,L:90,XL:30}});dongPhieu({phieuId:pA1,lyDo:null});
+  at(27,17);const pA23=doGiao(dA,'t1',2,{S:60,M:120,L:90,XL:30},3);       // GÓI: vắt sổ → ủi gấp
+  at(26,16);nhanVe({phieuId:pA23,dat:{S:60,M:120,L:88,XL:30},phe:{L:2}});dongPhieu({phieuId:pA23,lyDo:'Lỗi vắt sổ 2 cái'});
+  at(26,17);chamGio({donId:dA.id,thoId:'t4',gio:4});                      // Chị Mai ủi phụ 4 giờ
+  at(25,9);chiPhiDon({donId:dA.id,soTien:150000,dienGiai:'Ship nhận + giao hàng'});
+  at(25,10);giaoThanhPham({donId:dA.id,sizes:{S:60,M:120}});             // giao đợt 1: 180
+  at(24,15);giaoThanhPham({donId:dA.id,sizes:{L:88,XL:30}});             // giao đợt 2: đủ 298
+  at(24,16);dongDon(dA.id);                                              // chốt lãi
+
+  /* =========================================================
+     ĐƠN B · Đầm suông (Anh Dũng) — đang chạy dở: có phế, hụt,
+     cắt châm bù, tiền đền, tháo (3 kiểu chịu), 1 phiếu còn mở
+     ========================================================= */
+  at(27,9);const dB=taoDon({chuHangId:'c2',mauId:'m2',ma:'DS-1402',sizes:{S:40,M:80,L:70,XL:20},giaGiaCong:16000});
+  at(27,10);const pB0=doGiao(dB,'t3',0,{S:40,M:80,L:70,XL:20});          // Chú Tư: ráp thân
+  at(25,16);nhanVe({phieuId:pB0,dat:{S:40,M:77,L:70,XL:20},phe:{M:1}});dongPhieu({phieuId:pB0,lyDo:'Hụt 2 cái — đền sau'}); // giao 210, về 208 → hụt 2
+  at(24,17);xinCham({donId:dB.id,sizes:{M:5},lyDo:'Thiếu vải, cắt châm thêm 5 áo M'});
+  at(22,10);{const c=dB.chamList[dB.chamList.length-1];chamVeAction({donId:dB.id,chamId:c.id,veSizes:{M:5},shipCost:30000});}
+  at(21,9);const pB0b=doGiao(dB,'t3',0,{M:5});                           // châm 5 M qua công đoạn 0
+  at(20,16);nhanVe({phieuId:pB0b,dat:{M:5}});dongPhieu({phieuId:pB0b,lyDo:null});
+  at(20,17);const pB1=doGiao(dB,'t2',1,{S:40,M:77,L:70});                // Em Hà: may tà (chừa M5+XL20 lại)
+  at(18,16);nhanVe({phieuId:pB1,dat:{S:40,M:77,L:70}});dongPhieu({phieuId:pB1,lyDo:null});
+  at(17,10);tienDen({donId:dB.id,soTien:90000});                        // đền hàng hư khi còn chạy → vào giá hàng
+  at(16,15);ghiThao({donId:dB.id,dong:[
+    {sl:2,donGia:3000,thoId:'t2',aiChiu:'XUONG'},                        // xưởng chịu tiền tháo
+    {sl:1,donGia:3000,thoId:'t3',aiChiu:'THO'}]});                       // thợ tự chịu (không tiền)
+  at(15,15);ghiThao({donId:dB.id,dong:[
+    {sl:3,donGia:3000,thoId:'t2',aiChiu:'CHU_HANG'}]});                  // chủ hàng chịu → thu thêm
+  at(13,9);const pB2=doGiao(dB,'t1',2,{S:40,M:77,L:70});                 // Cô Bảy đang GIỮ (phiếu còn mở)
+
+  /* =========================================================
+     ĐƠN C · Sơ mi 5 công đoạn (Chị Hồng) — gói công đoạn +
+     nhận về NHIỀU ĐỢT khác điểm-đến; có công của chính chủ xưởng;
+     xong gần hết, còn 18 cái chờ giao
+     ========================================================= */
+  at(23,9);const dC=taoDon({chuHangId:'c3',mauId:'m4',ma:'SM-1105',sizes:{S:50,M:90,L:60,XL:20},giaGiaCong:15000});
+  at(23,10);const pC=doGiao(dC,'t1',0,{S:50,M:90,L:60,XL:20},2);         // GÓI công đoạn 0→2
+  at(20,16);nhanVe({phieuId:pC,batches:[
+    {dat:{S:50,M:90,L:60},den:2},                                       // xong hết gói (0→2)
+    {dat:{XL:20},den:0}]});                                             // XL mới xong bước 0 → đáp về chờ ở bước 1
+  dongPhieu({phieuId:pC,lyDo:null});
+  at(19,9);const pCxl=doGiao(dC,'t3',1,{XL:20},2);                       // Chú Tư làm nốt XL bước 1→2
+  at(17,16);nhanVe({phieuId:pCxl,dat:{XL:20}});dongPhieu({phieuId:pCxl,lyDo:null});
+  at(16,17);const pC3=doGiao(dC,'t2',3,{S:50,M:90,L:60,XL:20});         // Em Hà: thùa khuy đơm nút
+  at(14,16);nhanVe({phieuId:pC3,dat:{S:50,M:90,L:60,XL:18},phe:{XL:2}});dongPhieu({phieuId:pC3,lyDo:'Nút lỗi 2 cái'});
+  at(14,17);const pC4=doGiao(dC,'t0',4,{S:50,M:90,L:60,XL:18});         // Chủ xưởng tự ủi gấp (công mình)
+  at(12,16);nhanVe({phieuId:pC4,dat:{S:50,M:90,L:60,XL:18}});dongPhieu({phieuId:pC4,lyDo:null});
+  at(12,17);chiPhiDon({donId:dC.id,soTien:120000,dienGiai:'Ship 2 chiều'});
+  at(11,10);giaoThanhPham({donId:dC.id,sizes:{S:50,M:90,L:60}});        // giao 200, chừa XL18 chờ giao
+
+  /* =========================================================
+     ĐƠN D · Quần jogger nhỏ (Anh Dũng) — HỦY giữa chừng → lỗ
+     ========================================================= */
+  at(19,10);const dD=taoDon({chuHangId:'c2',mauId:'m3',ma:'JG-1108',sizes:{M:20,L:10},giaGiaCong:14000});
+  at(19,11);const pD0=doGiao(dD,'t5',0,{M:20,L:10});                     // Bé Linh: may thân
+  at(15,16);nhanVe({phieuId:pD0,dat:{M:20,L:10}});dongPhieu({phieuId:pD0,lyDo:null});
+  at(10,10);huyDon(dD.id);                                              // chủ hàng huỷ → WIP thành lỗ
+
+  /* =========================================================
+     ĐƠN E · Áo thun nhỏ (Chị Lan) — giao xong rồi bị TRẢ LẠI
+     ========================================================= */
+  at(18,9);const dE=taoDon({chuHangId:'c1',mauId:'m1',ma:'AT-2405',sizes:{S:20,M:30},giaGiaCong:9000});
+  at(17,10);runChain(dE,[['t1',0,{S:20,M:30}],['t2',1,{S:20,M:30}],['t1',2,{S:20,M:30}],['t3',3,{S:20,M:30}]]);
+  at(16,10);giaoThanhPham({donId:dE.id,sizes:{S:20,M:30}});             // giao đủ 50
+  at(16,11);dongDon(dE.id);
+  at(9,10);traLai(dE.id);                                               // hàng bị trả lại → đảo doanh thu
+
+  /* ---------- THU TIỀN CHỦ HÀNG (FIFO theo phiếu) ---------- */
+  at(23,15);thuTien({chuHangId:'c1',soTien:1500000});                   // trả bớt đơn A
+  at(21,15);thuTien({chuHangId:'c2',soTien:800000});                    // trả bớt nợ đầu kỳ
+  at(10,15);thuTien({chuHangId:'c3',soTien:2000000});                   // trả bớt đơn C
+  at(6,15);thuTien({chuHangId:'c1',soTien:1200000});                    // trả nốt đơn A → còn DƯ thành tạm ứng
+  at(4,15);noXau({chuHangId:'c2',soTien:150000});                       // xoá nợ xấu một phần
+
+  /* ---------- LƯƠNG THỢ (ứng + trả, còn nợ phần lớn) ---------- */
+  at(24,17);traLuong({thoId:'t1',soTien:500000});
+  at(20,10);ungLuong({thoId:'t2',soTien:400000});
+  at(13,17);traLuong({thoId:'t2',soTien:600000});
+  at(9,17);traLuong({thoId:'t3',soTien:500000});
+  at(5,17);traLuong({thoId:'t5',soTien:150000});
+
+  /* ---------- CHI PHÍ XƯỞNG + CHỦ RÚT TIỀN ---------- */
+  at(15,9);chiPhiXuong({soTien:250000,dienGiai:'Chỉ, kim, phụ liệu'});
+  at(7,9);rutVon({soTien:3000000,dienGiai:'Chủ rút tiền chợ'});
+  at(2,9);chiPhiXuong({soTien:150000,dienGiai:'Sửa máy may'});
+
+  /* ---------- KHÓA KỲ (đưa rổ chi phí chung về 0) ---------- */
+  at(1,20);khoaKy();
+
+  SEED_CLOCK=null;                                                       // trả đồng hồ về thời gian thật
+  DB.settings.view='tongquan';Store.save();
+}
+
 
 /* ===========================================================
    GIAO DIỆN
@@ -771,7 +951,7 @@ function homeBody(){
   if(quaHan.length){const s=quaHan.sort((a,b)=>b.conLai-a.conLai)[0];const chu=getChu(s.chuHangId);
     jobs.push({ic:'💵',t:`Đòi nợ quá hạn: ${chu.ten}`,s:`${fmt(s.conLai)} · gối ${days(s.ngay)} ngày`,cl:`modalThuTien('${s.chuHangId}')`});}
   if(giuLau.length){const p=giuLau[0];const don=getDon(p.donId);
-    jobs.push({ic:'🧵',t:`Nhận hàng về: ${getTho(p.thoId).ten}`,s:`${don.ma} · ${don.snapshotCD[p.congDoanIdx].ten} · giữ ${days(p.ngay)} ngày`,cl:`modalNhanVe('${p.id}')`});}
+    jobs.push({ic:'🧵',t:`Nhận hàng về: ${getTho(p.thoId).ten}`,s:`${don.ma} · ${tenDai(don,p)} · giữ ${days(p.ngay)} ngày`,cl:`modalNhanVe('${p.id}')`});}
   if(donChoGiao.length){const d=donChoGiao[0];
     jobs.push({ic:'📦',t:`Giao hàng cho chủ: ${d.ma}`,s:`${coTheGiaoTong(d)} cái đã xong · ${getChu(d.chuHangId).ten}`,cl:`modalGiaoTP('${d.id}')`});}
   canhBao.slice(0,2).forEach(d=>{const p=phieuCoHut(d)[0];
@@ -861,7 +1041,7 @@ function modalDon(id){
   const phieuMo=DB.phieuGiao.filter(p=>p.donId===id&&p.trangThai==='MO');
   let phieuRows=phieuMo.map(p=>{const daNhan=pNhan(p);
     return `<div class="slip"><div><div class="who">${getTho(p.thoId).ten}</div>
-      <div class="meta">${don.snapshotCD[p.congDoanIdx].ten} · ${pSizes(p).map(s=>s+':'+pGiaoSize(p,s)).join(' ')} · giao ${pGiao(p)}${daNhan?` · đã về ${daNhan}`:''}</div></div>
+      <div class="meta">${tenDai(don,p)} · ${pSizes(p).map(s=>s+':'+pGiaoSize(p,s)).join(' ')} · giao ${pGiao(p)}${daNhan?` · đã về ${daNhan}`:''}</div></div>
       <button class="btn btn-tape btn-sm" onclick="event.stopPropagation();modalNhanVe('${p.id}')">Nhận về</button></div>`;}).join('');
   if(!phieuMo.length)phieuRows=`<div class="divider-note">Chưa giao việc nào đang mở</div>`;
   // cắt châm đang chờ
@@ -956,43 +1136,66 @@ function submitTaoDon(){try{const mau=getMau(tdState.mauId);if(!mau)return toast
 
 /* ---------- Giao việc ---------- */
 let gvState={};
-function modalGiaoViec(donId){const don=getDon(donId);let cdIdx=0;
-  for(let n=0;n<don.snapshotCD.length;n++){if(tonCD(don,n)>0){cdIdx=n;break;}}
-  gvState={donId,cdIdx,thoId:DB.tho.find(t=>!t.isOwner&&t.loai==='sp').id,giao:{}};gvFill();drawGiaoViec();}
-function gvFill(){gvState.giao={};}
-function drawGiaoViec(){const don=getDon(gvState.donId);
-  const cdChips=don.snapshotCD.map((c,n)=>{const t=tonCD(don,n);
-    return `<div class="chip ${gvState.cdIdx===n?'sel':''}" ${t>0?'':'style="opacity:.4"'} onclick="gvPick('cd',${n})">${n+1}.${c.ten}<small>${t} chờ</small></div>`;}).join('');
+function modalGiaoViec(donId){const don=getDon(donId);let cdFrom;
+  for(let n=0;n<don.snapshotCD.length;n++){if(tonCD(don,n)>0){cdFrom=n;break;}}
+  const firstTho=DB.tho.find(t=>!t.isOwner&&t.loai==='sp')||DB.tho.find(t=>t.loai==='sp');
+  gvState={donId,thoId:firstTho?firstTho.id:(DB.tho[0]&&DB.tho[0].id),cdFrom,cdTo:cdFrom,giao:{}};gvFill();drawGiaoViec();}
+function gvFill(){const don=getDon(gvState.donId);gvState.giao={};
+  if(gvState.cdFrom===undefined)return;
+  sizesOf(don).forEach(s=>{const v=Math.max(0,ton(don,gvState.cdFrom,s));if(v>0)gvState.giao[s]=v;});}
+function drawGiaoViec(){const don=getDon(gvState.donId);const hasSel=gvState.cdFrom!==undefined;
   const thoChips=DB.tho.filter(t=>t.loai==='sp').map(t=>`<div class="chip ${gvState.thoId===t.id?'sel':''}" onclick="gvPick('tho','${t.id}')">${t.isOwner?'🧑‍🔧 ':''}${t.ten}</div>`).join('');
-  const avail=sizesOf(don).map(s=>({s,v:Math.max(0,ton(don,gvState.cdIdx,s))})).filter(x=>x.v>0);
+  const cdChips=don.snapshotCD.map((c,n)=>{const t=tonCD(don,n);const startable=t>0;
+    const inRange=hasSel&&n>=gvState.cdFrom&&n<=gvState.cdTo;
+    const dim=(!hasSel&&!startable)?'style="opacity:.4"':'';
+    return `<div class="chip ${inRange?'sel':''}" ${dim} onclick="gvPickCD(${n})">${n+1}.${c.ten}<small>${startable?t+' chờ':'—'}</small></div>`;}).join('');
+  const goiTxt=hasSel?(gvState.cdFrom===gvState.cdTo?don.snapshotCD[gvState.cdFrom].ten
+      :don.snapshotCD[gvState.cdFrom].ten+' → '+don.snapshotCD[gvState.cdTo].ten):'';
+  const soCD=hasSel?(gvState.cdTo-gvState.cdFrom+1):0;
+  const dgGoi=hasSel?sum(don.snapshotCD.slice(gvState.cdFrom,gvState.cdTo+1).map(c=>c.donGia)):0;
+  const avail=hasSel?sizesOf(don).map(s=>({s,v:Math.max(0,ton(don,gvState.cdFrom,s))})).filter(x=>x.v>0):[];
   const tong=sum(Object.values(gvState.giao));
   const sizeRows=avail.length?avail.map(x=>{const on=(gvState.giao[x.s]||0)>0;return `<div class="gv-row${on?' on':''}">
       <label class="gv-tick"><input type="checkbox" ${on?'checked':''} onchange="gvTick('${x.s}',this.checked,${x.v})"><span>Cỡ ${x.s}<small>còn ${x.v}</small></span></label>
       <div class="stepper sm"><button ${on?'':'disabled'} onclick="gvSl('${x.s}',-5,${x.v})">−</button>
         <input type="number" id="gv_${x.s}" value="${gvState.giao[x.s]||0}" ${on?'':'disabled'} onchange="gvSet('${x.s}',+this.value,${x.v})" onfocus="this.select()">
-        <button ${on?'':'disabled'} onclick="gvSl('${x.s}',5,${x.v})">＋</button></div></div>`;}).join(''):'<div class="hint">Công đoạn này chưa có hàng chờ.</div>';
+        <button ${on?'':'disabled'} onclick="gvSl('${x.s}',5,${x.v})">＋</button></div></div>`;}).join(''):'<div class="hint">Công đoạn đầu của gói chưa có hàng chờ.</div>';
   openSheet('Giao việc — '+don.ma,`
-    <div class="field"><label>Công đoạn</label><div class="chipset">${cdChips}</div></div>
     <div class="field"><label>Giao cho thợ</label><div class="chipset">${thoChips}</div></div>
-    ${avail.length?`<div class="field"><label>Chọn cỡ & số cái giao</label>
+    <div class="field"><label>Công đoạn — chạm chọn gói (đầu → cuối, liền nhau)</label><div class="chipset">${cdChips}</div>
+      ${hasSel?`<div class="hint" style="margin-top:6px">Gói: <b>${goiTxt}</b>${soCD>1?' · '+soCD+' công đoạn':''} · tổng công <b>${fmt(dgGoi)}</b>/cái. Chạm công đoạn sau để nối dài; chạm công đoạn có hàng chờ để đổi điểm bắt đầu.</div>`:`<div class="hint" style="margin-top:6px">Chọn công đoạn đang có hàng chờ để bắt đầu gói.</div>`}</div>
+    ${hasSel&&avail.length?`<div class="field"><label>Chọn cỡ & số cái giao</label>
       <div class="act-grid" style="margin-bottom:8px"><button class="btn btn-ghost btn-sm" onclick="gvAll(1)">Chọn hết</button><button class="btn btn-ghost btn-sm" onclick="gvAll(0)">Bỏ hết</button></div>
       ${sizeRows}
-      <div class="hint">Tích vào cỡ muốn giao (tích là lấy hết số đang chờ, có thể chỉnh xuống). Một thợ nhận nhiều cỡ trong cùng một phiếu.</div></div>
-      <button class="btn btn-primary" onclick="submitGiaoViec()">Giao ${tong} cái</button>`:''}`);
+      <div class="hint">Một thợ ôm cả gói, làm hết dải rồi trả về <b>một lần</b>. Tiền công tính theo <b>tổng đơn giá</b> các công đoạn trong gói.</div></div>
+      <button class="btn btn-primary" onclick="submitGiaoViec()">Giao ${tong} cái${soCD>1?' · gói '+soCD+' công đoạn':''}</button>`:''}`);
 }
-function gvPick(k,v){if(k==='cd'){gvState.cdIdx=v;gvFill();}if(k==='tho')gvState.thoId=v;drawGiaoViec();}
+function gvPick(k,v){if(k==='tho')gvState.thoId=v;drawGiaoViec();}
+function gvPickCD(n){const don=getDon(gvState.donId);const startable=tonCD(don,n)>0;
+  if(gvState.cdFrom===undefined){if(!startable)return toast('Công đoạn này chưa có hàng chờ để bắt đầu.',true);gvState.cdFrom=n;gvState.cdTo=n;gvFill();}
+  else if(n<gvState.cdFrom){if(!startable)return toast('Muốn bắt đầu ở đây thì công đoạn phải có hàng chờ.',true);gvState.cdFrom=n;gvFill();}
+  else if(n===gvState.cdTo){
+    // chạm lại đúng công đoạn cuối đang chọn → bỏ bớt
+    if(n===gvState.cdFrom){gvState.cdFrom=undefined;gvState.cdTo=undefined;gvState.giao={};} // gói chỉ 1 công đoạn → bỏ chọn hết
+    else{gvState.cdTo=n-1;} // gói nhiều công đoạn → thu ngắn 1 bước từ cuối
+  }
+  else{gvState.cdTo=n;} // n trong dải hoặc xa hơn → đặt điểm cuối mới
+  drawGiaoViec();}
 function gvSet(s,v,max){v=Math.max(0,Math.min(max,v||0));if(v>0)gvState.giao[s]=v;else delete gvState.giao[s];drawGiaoViec();}
 function gvSl(s,d,max){gvSet(s,(gvState.giao[s]||0)+d,max);}
 function gvTick(s,on,max){if(on)gvState.giao[s]=max;else delete gvState.giao[s];drawGiaoViec();}
 function gvAll(on){const don=getDon(gvState.donId);gvState.giao={};
-  if(on)sizesOf(don).forEach(s=>{const v=Math.max(0,ton(don,gvState.cdIdx,s));if(v>0)gvState.giao[s]=v;});drawGiaoViec();}
-function submitGiaoViec(){try{if(sum(Object.values(gvState.giao))<=0)return toast('Chọn ít nhất một cỡ.',true);
-  giaoViec({donId:gvState.donId,congDoanIdx:gvState.cdIdx,thoId:gvState.thoId,giao:gvState.giao});
-  closeSheet();render();modalDon(gvState.donId);toast('Đã giao việc cho thợ.');}catch(e){toast(e.message,true)}}
+  if(on&&gvState.cdFrom!==undefined)sizesOf(don).forEach(s=>{const v=Math.max(0,ton(don,gvState.cdFrom,s));if(v>0)gvState.giao[s]=v;});drawGiaoViec();}
+function submitGiaoViec(){try{if(gvState.cdFrom===undefined)return toast('Chọn công đoạn đã.',true);
+  if(sum(Object.values(gvState.giao))<=0)return toast('Chọn ít nhất một cỡ.',true);
+  giaoViec({donId:gvState.donId,cdFrom:gvState.cdFrom,cdTo:gvState.cdTo,thoId:gvState.thoId,giao:gvState.giao});
+  closeSheet();render();modalDon(gvState.donId);toast('Đã giao gói việc cho thợ.');}catch(e){toast(e.message,true)}}
 
 /* ---------- Nhận về ---------- */
+let nvGroups=[],_nvSeq=0;
 function modalNhanVe(phieuId){const p=DB.phieuGiao.find(x=>x.id===phieuId);const don=getDon(p.donId);
-  const sizes=pSizes(p);
+  nvGroups=[];_nvSeq=0;
+  const sizes=pSizes(p);const multi=pTo(p)>pFrom(p);
   const rows=sizes.map(s=>{const con=pConSize(p,s);
     return `<div class="nv-row"><div class="nv-lbl">Cỡ ${s}<small>giao ${pGiaoSize(p,s)} · còn ${con}</small></div>
       <div class="nv-ins">
@@ -1000,16 +1203,33 @@ function modalNhanVe(phieuId){const p=DB.phieuGiao.find(x=>x.id===phieuId);const
         <div class="nv-in"><span>hư</span><input type="number" id="nv_phe_${s}" value="0" onfocus="this.select()"></div>
       </div></div>`;}).join('');
   openSheet('Nhận hàng về',`
-    <div style="margin:-4px 0 14px"><div style="font-weight:700">${getTho(p.thoId).ten} · ${don.snapshotCD[p.congDoanIdx].ten}</div>
+    <div style="margin:-4px 0 14px"><div style="font-weight:700">${getTho(p.thoId).ten} · ${tenDai(don,p)}</div>
       <div style="font-size:13px;color:var(--ink-2)">Giao ${pGiao(p)} cái · ${sizes.map(s=>s+':'+pGiaoSize(p,s)).join(' ')}${pNhan(p)?` · đã nhận ${pNhan(p)}`:''}</div></div>
     <button class="btn btn-sage" onclick="nhanDu('${phieuId}')" style="margin-bottom:14px">✓ Trả xong đủ, đúng số từng cỡ</button>
-    <div class="divider-note">hoặc nhập số từng cỡ</div>
-    <div class="field"><label>Số cái nhận về theo cỡ</label>${rows}
+    <div class="divider-note">${multi?'xong HẾT gói — nhập số từng cỡ':'hoặc nhập số từng cỡ'}</div>
+    <div class="field"><label>Số cái ${multi?'làm xong hết gói':'nhận về'} theo cỡ</label>${rows}
       <div class="hint">Thợ nhận công phần đạt, không tính công phần hư. Bỏ trống cỡ chưa trả.</div></div>
+    ${multi?`<div class="field" style="border:1px dashed var(--line);border-radius:12px;padding:10px 10px 12px">
+      <label style="display:block;margin-bottom:4px">⚠ Có hàng chưa làm hết các bước?</label>
+      <div class="hint" style="margin:0 0 8px">Hàng mới xong vài bước đầu (kẹt máy, hết phụ liệu…). Ghi rõ <b>xong đến bước nào</b> — số này sẽ về chờ ở bước kế để giao tiếp, thợ chỉ nhận công các bước đã làm.</div>
+      <div id="nvGroups"></div>
+      <button class="btn btn-ghost btn-sm" onclick="nvAddGroup('${phieuId}')">＋ Thêm nhóm chưa xong hết</button></div>`:''}
     <button class="btn btn-tape" onclick="nhanMotDot('${phieuId}')" style="margin-bottom:10px">Ghi đợt này, còn nữa</button>
     <button class="btn btn-primary" onclick="nhanVaDong('${phieuId}')">Ghi đợt này & đóng phiếu</button>
     ${p.dongNhan.length?'':`<div style="height:10px"></div><button class="btn btn-danger" onclick="doHuyPhieu('${phieuId}')">Thợ trả lại nguyên — hủy phiếu</button>`}`);
 }
+/* nhóm "chưa xong hết": chọn bước dừng (cdFrom..cdTo-1) + số cái từng cỡ */
+function nvAddGroup(phieuId){const p=DB.phieuGiao.find(x=>x.id===phieuId);const don=getDon(p.donId);
+  const g=++_nvSeq;nvGroups.push(g);const sizes=pSizes(p);
+  let opts='';for(let i=pFrom(p);i<pTo(p);i++)opts+=`<option value="${i}">Xong đến hết bước ${i+1}. ${don.snapshotCD[i].ten}</option>`;
+  const sizeIns=sizes.map(s=>`<div class="nv-in"><span>${s}</span><input type="number" id="nvg_${g}_${s}" value="0" onfocus="this.select()" style="width:52px"></div>`).join('');
+  const html=`<div class="nvg-card" id="nvgCard_${g}" style="border:1px solid var(--line);border-radius:10px;padding:8px;margin-bottom:8px;background:#fff">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+      <select id="nvg_stage_${g}" style="flex:1;padding:7px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:#fff">${opts}</select>
+      <button class="btn btn-ghost btn-sm" onclick="nvDelGroup(${g})" style="padding:5px 9px">✕</button></div>
+    <div class="nv-ins" style="flex-wrap:wrap;gap:6px">${sizeIns}</div></div>`;
+  const box=el('nvGroups');if(box)box.insertAdjacentHTML('beforeend',html);}
+function nvDelGroup(g){nvGroups=nvGroups.filter(x=>x!==g);const c=el('nvgCard_'+g);if(c)c.remove();}
 function stepIn(id,d){const e=el(id);e.value=Math.max(0,(+e.value||0)+d)}
 function nvRead(p){const dat={},phe={};pSizes(p).forEach(s=>{const d=+((el('nv_dat_'+s)||{}).value||0),f=+((el('nv_phe_'+s)||{}).value||0);if(d>0)dat[s]=d;if(f>0)phe[s]=f;});return {dat,phe};}
 function doHuyPhieu(phieuId){try{const p=DB.phieuGiao.find(x=>x.id===phieuId);huyPhieu(phieuId);
@@ -1301,17 +1521,17 @@ function viewTho(m){
 function nangSuat(thoId){
   const ps=DB.phieuGiao.filter(p=>p.thoId===thoId&&p.trangThai!=='HUY');
   let tongCai=0,tongCong=0,tongPhe=0;
-  ps.forEach(p=>{const don=getDon(p.donId);const cd=don.snapshotCD[p.congDoanIdx];
-    const dat=pDat(p);tongCai+=dat;tongCong+=dat*cd.donGia;tongPhe+=pPhe(p);});
+  ps.forEach(p=>{const don=getDon(p.donId);
+    const dat=pDat(p);tongCai+=dat;tongCong+=dat*donGiaDai(don,p);tongPhe+=pPhe(p);});
   const pg=DB.phienGio.filter(x=>x.thoId===thoId);const tongGio=sum(pg.map(x=>x.gio));tongCong+=sum(pg.map(x=>x.tien));
   return {tongCai,tongCong,tongPhe,tongGio};
 }
 function congThoEvents(thoId){
   const ev=[];
   DB.phieuGiao.filter(p=>p.thoId===thoId&&p.trangThai!=='HUY').forEach(p=>{
-    const don=getDon(p.donId);const cd=don.snapshotCD[p.congDoanIdx];
+    const don=getDon(p.donId);const mo=tenDai(don,p);const dg=donGiaDai(don,p);
     (p.dongNhan||[]).forEach(dn=>{const sl=sum(Object.values(dn.dat||{}));if(sl<=0)return;
-      ev.push({ngay:dn.ngay,don:don.ma,mo:cd.ten,soCai:sl,tien:sl*cd.donGia});});});
+      ev.push({ngay:dn.ngay,don:don.ma,mo,soCai:sl,tien:sl*dg});});});
   DB.phienGio.filter(x=>x.thoId===thoId).forEach(pg=>{const don=getDon(pg.donId);
     ev.push({ngay:pg.ngay,don:don?don.ma:'—',mo:'Công giờ '+pg.gio+'h',soCai:0,tien:pg.tien});});
   (DB.phieuThao||[]).forEach(pt=>{const don=getDon(pt.donId);
@@ -1404,7 +1624,7 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
   h+=`<div class="act-grid">
     ${no>0?`<button class="btn btn-primary" onclick="modalTraLuong('${id}')">Trả lương</button>`:''}
     <button class="btn btn-ghost" onclick="modalUng('${id}')">Ứng lương</button>
-    ${no<0?`<button class="btn btn-danger wide" onclick="modalXoaUng('${id}')">Thợ nghỉ việc — xóa ứng dư</button>`:''}</div>`;
+    ${no<0?`<button class="btn btn-danger wide" onclick="if(confirm('Thợ đã ứng dư '+fmt(${-no})+'. Nếu nghỉ không đòi lại được sẽ ghi thành lỗ. Xác nhận xóa?')){xoaUngTho({thoId:'${id}',soTien:${-no}});closeSheet();render();toast('Đã xóa số dư ứng.');}">Thợ nghỉ việc — xóa ứng dư</button>`:''}</div>`;
   const ev=congThoEvents(id);const chua=ev.filter(e=>!e.daTinh);const roi=ev.filter(e=>e.daTinh);
   const chuaTong=sum(chua.map(e=>e.tien-(e.tinhMotPhan||0)));
   h+=`<div class="card"><div class="card-pad">
@@ -1440,10 +1660,6 @@ function ulWarn(thoId){const b=bal(TK.PHAI_TRA_THO,d=>d.thoId===thoId);const con
   el('ul_warn').innerHTML=s>conLai?`<div class="warn-box" style="margin:8px 0 0">⚠ Ứng ${fmt(s)} vượt công đã làm ${fmt(Math.max(0,conLai))} — thợ sẽ nợ ngược ${fmt(s-Math.max(0,conLai))}. Vẫn ghi được, chỉ nhắc bạn.</div>`:'';}
 function submitUng(thoId){try{const s=numVal('ul_sl');if(s<=0)return toast('Nhập số tiền.',true);
   ungLuong({thoId,soTien:s});closeSheet();render();toastUndo('Đã ghi ứng lương.');}catch(e){toast(e.message,true)}}
-function modalXoaUng(thoId){const no=luongNoTho(thoId);openSheet('Thợ nghỉ việc còn ứng dư',`
-  <div class="warn-box">Thợ đã ứng dư ${fmt(-no)}. Nếu nghỉ không đòi lại được, ghi thành lỗ.</div>
-  <button class="btn btn-danger" onclick="submitXoaUng('${thoId}',${-no})">Xóa số dư & ghi lỗ</button>`);}
-function submitXoaUng(thoId,soTien){xoaUngTho({thoId,soTien});closeSheet();render();toast('Đã xóa số dư ứng.');}
 function confirmTraHet(){openSheet('Trả hết lương',`
   <div class="hint" style="margin-bottom:14px">Trả toàn bộ lương đang nợ cho tất cả thợ. Chỉ làm khi két đủ tiền.</div>
   <button class="btn btn-sage" onclick="doTraHet()">Xác nhận trả hết</button>`);}
@@ -1476,59 +1692,9 @@ function taiCSV(name,rows){
   const csv=BOM+rows.map(r=>r.map(c=>{c=(''+c).replace(/"/g,'""');return (/[",;]/.test(c)||c.indexOf(LF)>=0)?'"'+c+'"':c;}).join(',')).join(NL);
   exportModal('Xuất CSV',name+'-'+new Date().toISOString().slice(0,10)+'.csv',csv,'text/csv;charset=utf-8','Bảng CSV mở được bằng Excel / Google Sheets. Tải file hoặc sao chép.');
 }
-function csvCell(x){x=(''+(x==null?'':x));return /[",\n\r]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}
-function csvRow(a){return a.map(csvCell).join(',');}
-function parseCSV(text){const rows=[];let i=0,cell='',row=[],inq=false;const n=text.length;
-  while(i<n){const c=text[i];
-    if(inq){if(c==='"'){if(text[i+1]==='"'){cell+='"';i+=2;continue;}inq=false;i++;continue;}cell+=c;i++;continue;}
-    if(c==='"'){inq=true;i++;continue;}
-    if(c===','){row.push(cell);cell='';i++;continue;}
-    if(c==='\r'){i++;continue;}
-    if(c==='\n'){row.push(cell);rows.push(row);row=[];cell='';i++;continue;}
-    cell+=c;i++;}
-  row.push(cell);rows.push(row);return rows;}
-function dbToCSV(){const L=[];const NL=String.fromCharCode(13,10);
-  L.push('SOXUONG_CSV,3');L.push('');
-  L.push('@CHUHANG');L.push(csvRow(['id','ten']));
-  DB.chuHang.forEach(c=>L.push(csvRow([c.id,c.ten])));
-  L.push('');L.push('@THO');L.push(csvRow(['id','ten','loai','donGiaGio','isOwner']));
-  DB.tho.forEach(t=>L.push(csvRow([t.id,t.ten,t.loai||'sp',t.donGiaGio||0,t.isOwner?1:0])));
-  L.push('');L.push('@MAU');L.push(csvRow(['chuHangId','id','ten','sizes','giaGiaCong','gioDinhMuc','congDoan']));
-  DB.chuHang.forEach(c=>(c.mau||[]).forEach(m=>L.push(csvRow([c.id,m.id,m.ten,(m.sizeList||[]).join('|'),m.giaGiaCong||0,m.gioDinhMuc||0,(m.congDoan||[]).map(x=>x.ten+':'+x.donGia).join('|')]))));
-  L.push('');L.push('@SETTINGS');L.push(csvRow(['key','value']));
-  Object.keys(DB.settings||{}).forEach(k=>{const v=DB.settings[k];L.push(csvRow([k,(v&&typeof v==='object')?JSON.stringify(v):v]));});
-  const jt=(name,arr)=>{L.push('');L.push('@'+name);L.push('json');(arr||[]).forEach(o=>L.push(csvRow([JSON.stringify(o)])));};
-  jt('DON',DB.don);jt('PHIEUGIAO',DB.phieuGiao);jt('PHIENGIO',DB.phienGio);jt('PHIEUTHAO',DB.phieuThao);jt('GIAOTP',DB.giaoTP);jt('BUTTOAN',DB.butToan);
-  return String.fromCharCode(0xFEFF)+L.join(NL);}
-function csvToDB(text){if(text.charCodeAt(0)===0xFEFF)text=text.slice(1);
-  const rows=parseCSV(text).filter(r=>!(r.length===1&&r[0].trim()===''));
-  if(!rows.length||!/^SOXUONG_CSV/.test(rows[0][0]))throw new Error('không phải CSV Sổ Xưởng');
-  const sec={};let cur=null;
-  for(let k=1;k<rows.length;k++){const r=rows[k];
-    if(r[0]&&r[0].charAt(0)==='@'){cur=r[0].slice(1);sec[cur]=[];continue;}
-    if(cur)sec[cur].push(r);}
-  const db={schema:SCHEMA,chuHang:[],tho:[],don:[],phieuGiao:[],phienGio:[],phieuThao:[],giaoTP:[],butToan:[],settings:{tyLeChung:0.15,view:'don'}};
-  function tbl(name){const sc=sec[name];if(!sc||!sc.length)return [];const head=sc[0];return sc.slice(1).map(r=>{const o={};head.forEach((h,i)=>o[h]=r[i]);return o;});}
-  tbl('CHUHANG').forEach(o=>{if(o.id)db.chuHang.push({id:o.id,ten:o.ten||'',mau:[]});});
-  const cById={};db.chuHang.forEach(c=>cById[c.id]=c);
-  tbl('THO').forEach(o=>{if(!o.id)return;const t={id:o.id,ten:o.ten||'',loai:o.loai||'sp',donGiaGio:+o.donGiaGio||0};if(+o.isOwner)t.isOwner=true;db.tho.push(t);});
-  tbl('MAU').forEach(o=>{if(!o.id)return;const c=cById[o.chuHangId];if(!c)return;
-    const sizeList=(o.sizes||'').split('|').map(x=>x.trim()).filter(Boolean);
-    const congDoan=(o.congDoan||'').split('|').map(x=>x.trim()).filter(Boolean).map(seg=>{const j=seg.lastIndexOf(':');return {ten:j>=0?seg.slice(0,j):seg,donGia:j>=0?(+seg.slice(j+1)||0):0};});
-    c.mau.push({id:o.id,ten:o.ten||'',sizeList,giaGiaCong:+o.giaGiaCong||0,gioDinhMuc:+o.gioDinhMuc||0,congDoan,lichSuGia:[{ngay:now(),congDoan:congDoan.map(x=>({...x})),sizeList:sizeList.slice(),giaGiaCong:+o.giaGiaCong||0}]});});
-  const st=sec['SETTINGS'];if(st&&st.length)st.slice(1).forEach(r=>{const k=r[0],v=r[1];if(!k)return;let val=v;
-    if(v==='true')val=true;else if(v==='false')val=false;else if(v!==''&&/^-?[0-9]+(\.[0-9]+)?$/.test(v))val=+v;else if(/^[[{]/.test(v||'')){try{val=JSON.parse(v);}catch(e){}}
-    db.settings[k]=val;});
-  const jr=name=>{const sc=sec[name];if(!sc)return [];return sc.filter(r=>r[0]&&r[0]!=='json').map(r=>{try{return JSON.parse(r[0]);}catch(e){return null;}}).filter(Boolean);};
-  db.don=jr('DON');db.phieuGiao=jr('PHIEUGIAO');db.phienGio=jr('PHIENGIO');db.phieuThao=jr('PHIEUTHAO');db.giaoTP=jr('GIAOTP');db.butToan=jr('BUTTOAN');
-  return db;}
 function importAny(text){const stripped=(''+text).replace(/^\uFEFF/,'');const t=stripped.replace(/^\s+/,'');
-  let obj;
-  if(t.charAt(0)==='{')obj=JSON.parse(t);
-  else if(/^SOXUONG_CSV/.test(t)||t.charAt(0)==='@')obj=csvToDB(stripped);
-  else throw new Error('định dạng lạ — cần JSON hoặc CSV Sổ Xưởng');
-  applyImport(obj);}
-function xuatToanBoCSV(){exportModal('Toàn bộ dữ liệu (CSV)','so-xuong-toanbo-'+new Date().toISOString().slice(0,10)+'.csv',dbToCSV(),'text/csv;charset=utf-8','File CSV này chứa TOÀN BỘ dữ liệu và NẠP LẠI ĐƯỢC. Mở bằng Excel để xem/sửa danh mục (chủ hàng, thợ, mẫu, cỡ, giá). Phần giao dịch giữ nguyên để mọi thông số tính lại đúng.');}
+  if(t.charAt(0)!=='{')throw new Error('cần file sao lưu JSON (.json)');
+  applyImport(JSON.parse(t));}
 function xuatCongNoCSV(){const rows=[['Chủ hàng','Đơn','Loại phiếu','Ngày giao','Giá trị','Đã thu','Còn lại','Ngày gối']];
   DB.chuHang.forEach(c=>{slipList(c.id).forEach(sl=>{const d=sl.donId?getDon(sl.donId):null;
     rows.push([c.ten,d?d.ma:'—',sl.loai||'GIAO',new Date(sl.ngay).toLocaleDateString('vi-VN'),sl.giaTri,sl.daThu,sl.conLai,days(sl.ngay)]);});});
@@ -1691,7 +1857,7 @@ function doDaoOp(key){const ly=((el('op_ly')&&el('op_ly').value)||'').trim();if(
 /* ---------- TỔNG QUAN (gộp Hôm nay + Thu/Chi + Lợi nhuận) ---------- */
 let tqTab='home';
 const TQ_MAIN=[['home','Hôm nay'],['laitien','Lãi & Tiền'],['them','Thêm']];
-const TQ_HIDDEN={nhatky:'Nhật ký nhập',thuchi:'Thu / Chi & dòng tiền',xuhuong:'Xu hướng 6 tháng',rori:'Rò rỉ chi phí',khoaky:'Khóa kỳ'};
+const TQ_HIDDEN={nhatky:'Nhật ký nhập',thuchi:'Thu / Chi & dòng tiền',xuhuong:'Xu hướng 6 tháng',khoaky:'Khóa kỳ'};
 function viewTongQuan(m){
   if(!TQ_MAIN.some(s=>s[0]===tqTab)&&!(tqTab in TQ_HIDDEN))tqTab='home';
   const hidden=(tqTab in TQ_HIDDEN);
@@ -1700,7 +1866,7 @@ function viewTongQuan(m){
   if(hidden)h+=`<div style="display:flex;align-items:center;gap:8px;margin:-4px 2px 12px">
     <button class="btn btn-ghost btn-sm" onclick="tqTab='them';render()">‹ Quay lại</button>
     <b style="font-size:15px">${TQ_HIDDEN[tqTab]}</b></div>`;
-  h+=({home:homeBody,laitien:bcLaiTien,them:bcThem,nhatky:bcNhatKy,thuchi:thuChiBody,xuhuong:bcXuHuong,rori:bcRoRi,khoaky:bcKhoaKy}[tqTab])();
+  h+=({home:homeBody,laitien:bcLaiTien,them:bcThem,nhatky:bcNhatKy,thuchi:thuChiBody,xuhuong:bcXuHuong,khoaky:bcKhoaKy}[tqTab])();
   m.innerHTML=h;
 }
 /* Lãi & Tiền — trái tim của app: lời bao nhiêu + vì sao két không khớp, một màn duy nhất */
@@ -1713,7 +1879,6 @@ function bcThem(){
     ['nhatky','🗒️','Nhật ký nhập','Xem lại từng lần nhập · hoàn tác, sửa'],
     ['thuchi','💵','Thu / Chi & dòng tiền','Giao dịch tiền · tiền gối · WIP'],
     ['xuhuong','📈','Xu hướng 6 tháng','Lãi và dòng tiền theo tháng'],
-    ['rori','🕳️','Rò rỉ chi phí','Chi phí ngoài định mức ăn vào lãi'],
     ['khoaky','🔒','Khóa kỳ','Chốt chi phí chung cuối kỳ']];
   let h=`<div class="card">`+items.map(([k,ic,t,s])=>`<div class="slip" onclick="tqTab='${k}';render()">
     <div style="display:flex;gap:11px;align-items:flex-start"><div style="font-size:18px;line-height:1.2">${ic}</div>
@@ -1838,26 +2003,6 @@ function bcDongTien(){
   h+=`<div class="hint" style="text-align:center">Đây là PP-02: "tiền gối bị nhìn nhầm là lãi". Giờ nó có màn hình riêng.</div>`;
   return h;
 }
-function bcRoRi(){
-  // phân rã GIA_VON chênh lệch theo sự kiện
-  const groups={};let tong=0;
-  DB.butToan.forEach(bt=>bt.dong.forEach(d=>{if(d.tk===TK.GIA_VON&&d.loai==='CHENH_LECH'){
-    const key=bt.suKien.replace('Kết chuyển giá vốn','Chênh lệch định mức khi giao');
-    const v=d.chieu==='NO'?d.soTien:-d.soTien;groups[key]=(groups[key]||0)+v;tong+=v;}}));
-  // công tiêu trên hàng phế
-  let phe=0;DB.don.forEach(don=>DB.phieuGiao.filter(p=>p.donId===don.id).forEach(p=>{
-    const sp=pPhe(p);if(sp>0)phe+=sp*sum(don.snapshotCD.slice(0,p.congDoanIdx+1).map(c=>c.donGia));}));
-  let h=`<div class="reveal" style="background:linear-gradient(160deg,#8a4a2a,#6e3a20)">
-    <div class="lbl" style="color:#F3D3BE">Tổng rò rỉ (chi phí ngoài định mức)</div><div class="amt">${fmt(tong)}</div>
-    <div class="note">Tiền lặng lẽ ăn vào lãi — giờ có tên từng khoản</div></div>`;
-  h+=`<div class="card"><div class="card-pad">`;
-  const entries=Object.entries(groups).filter(([k,v])=>Math.abs(v)>0.5);
-  if(entries.length)entries.forEach(([k,v])=>{h+=`<div class="kv"><div class="k">${k}</div><div class="v ${v>=0?'money-neg':'money-pos'}">${fmt(v)}</div></div>`;});
-  else h+=`<div class="divider-note">Chưa có chênh lệch nào.</div>`;
-  if(phe>0)h+=`<div class="kv"><div class="k">(trong đó) công tiêu trên hàng phế</div><div class="v" style="color:var(--ink-3)">${fmt(phe)}</div></div>`;
-  h+=`</div></div><div class="hint" style="text-align:center">Đây là bảng §6.4 của Bước 2 — không còn là giả định, mà là một màn hình.</div>`;
-  return h;
-}
 function bcKhoaKy(){
   const ro=bal(TK.RO_CHUNG).net;
   const chiThuc=bal(TK.RO_CHUNG).no;const daHapThu=bal(TK.RO_CHUNG).co;
@@ -1868,6 +2013,10 @@ function bcKhoaKy(){
   if(Math.abs(ro)>0.5){h+=`<div class="warn-box">Khóa kỳ sẽ ghi phần chênh lệch thực–ước (${fmt(ro)}) vào giá vốn và đưa rổ về 0. Phần đã khóa <b>không sửa được</b> — sai sót sau này ghi ở kỳ mới.</div>
     <button class="btn btn-primary" onclick="doKhoaKy()">🔒 Khóa kỳ — chốt chênh lệch hiện tại</button>`;}
   else{h+=`<div class="check-ok">✓ Rổ chi phí đang ở 0 — chưa có gì để khóa. Cuối tháng, sau khi ghi hết chi phí, quay lại đây.</div>`;}
+  // công tiêu trên hàng phế (gộp từ 'Rò rỉ' cũ)
+  let phe=0;DB.don.forEach(don=>DB.phieuGiao.filter(p=>p.donId===don.id).forEach(p=>{
+    const sp=pPhe(p);if(sp>0)phe+=sp*sum(don.snapshotCD.slice(0,pTo(p)+1).map(c=>c.donGia));}));
+  if(phe>0)h+=`<div class="card"><div class="card-pad"><div class="kv"><div class="k">Công tiêu trên hàng phế (đến nay)</div><div class="v" style="color:var(--ink-3)">${fmt(phe)}</div></div><div class="hint" style="margin:6px 0 0">Tiền công đã trả cho phần hàng hư/phế — rò rỉ lặng lẽ ăn vào lãi.</div></div></div>`;
   const kyLogs=(DB.settings.kyLog||[]).slice().reverse();
   h+=`<div class="section-h">Các lần khóa kỳ (${kyLogs.length})</div><div class="card">`;
   h+=kyLogs.length?kyLogs.map(l=>`<div class="slip"><div><div class="who" style="font-size:13.5px">${new Date(l.ngay).toLocaleDateString('vi-VN')}</div>
@@ -1934,7 +2083,7 @@ function modalChonChuThu(){const list=DB.chuHang.map(c=>({c,no:noChuHang(c.id)})
 
 /* ---------- ⚙️ CÀI ĐẶT & DANH MỤC ---------- */
 function modalCaiDat(){
-  const lb=DB.settings.lastBackup;const phut=Math.max(1,Math.round((now()-session.start)/60000));
+  const lb=DB.settings.lastBackup;
   let h='';
   if(!lb||now()-lb>86400000)h+=`<div class="alert-strip as-amber" style="border-radius:12px;margin-bottom:12px;border:1px solid var(--tape-soft)">⚠ ${lb?'Đã '+days(lb)+' ngày chưa sao lưu':'Chưa sao lưu lần nào'} — nên tải bản sao lưu.</div>`;
   h+=`<div class="section-h" style="margin-top:0">Đồng bộ nhiều máy</div><div class="card"><div class="card-pad">
@@ -1958,11 +2107,7 @@ function modalCaiDat(){
       <div class="act-grid"><button class="btn btn-ghost" onclick="xuatCongNoCSV()">Công nợ chủ hàng</button>
         <button class="btn btn-ghost" onclick="xuatLuongCSV()">Lương thợ</button></div>
       <div style="height:8px"></div><button class="btn btn-ghost" onclick="xuatSoCongCSV(true)">Sổ công chi tiết (tất cả thợ)</button>
-      <div style="height:8px"></div><button class="btn btn-tape" onclick="xuatToanBoCSV()">🔄 Toàn bộ dữ liệu (CSV) — nạp lại được</button>
       <div class="hint" style="margin:8px 0 0">File .csv có dấu tiếng Việt, mở bằng Excel / Google Sheets.</div></div></div></div>`;
-  h+=`<div class="section-h">Đo hiệu quả (tự đo)</div><div class="card"><div class="card-pad">
-    <div class="kv"><div class="k">Số thao tác phiên này</div><div class="v">${session.taps} chạm · ${phut} phút</div></div>
-    <div class="hint" style="margin:6px 0 0">So với thời gian ghi sổ giấy — nếu app không nhanh hơn, phải thiết kế lại.</div></div></div>`;
   h+=`<div class="section-h">Nâng cao</div><div class="card"><div class="card-pad">
     <div class="kv"><div class="k">Tỷ lệ chi phí chung (ước)</div><div class="v">${Math.round(DB.settings.tyLeChung*100)}%</div></div>
     <div class="kv"><div class="k">Khóa kỳ gần nhất</div><div class="v">${DB.settings.kyKhoaTime?new Date(DB.settings.kyKhoaTime).toLocaleDateString('vi-VN'):'chưa lần nào'}</div></div>
@@ -1994,7 +2139,7 @@ function modalPhucHoi(){openSheet('Phục hồi & hiển thị lại',`
   <textarea id="imp_txt" placeholder="Dán nội dung JSON đã sao lưu..." style="width:100%;height:160px;font-family:monospace;font-size:11px;border:1.5px solid var(--line);border-radius:11px;padding:10px;background:var(--card)"></textarea>
   <div style="height:10px"></div>
   <button class="btn btn-primary" onclick="phucHoiText()">Phục hồi & hiển thị</button>`);}
-function resetData(){if(confirm('Xóa hết và nạp lại dữ liệu mẫu?')){seed();go('don');toast('Đã nạp lại dữ liệu mẫu.');}}
+function resetData(){if(confirm('Xóa hết và nạp lại dữ liệu mẫu?')){seedDemo();go('don');toast('Đã nạp lại dữ liệu mẫu.');}}
 
 /* ---------- Danh mục: modals ---------- */
 function modalThemChu(){openSheet('Thêm chủ hàng',`
@@ -2096,9 +2241,6 @@ function openSheet(title,body){el('sheet').innerHTML=`<div class="sheet-h"><b>${
 function closeSheet(){el('scrim').classList.remove('on');}
 el('scrim').addEventListener('click',e=>{if(e.target===el('scrim'))closeSheet();});
 document.addEventListener('input',e=>{const t=e.target;if(t&&t.classList&&t.classList.contains('sep')){const raw=(''+t.value).replace(/[^\d]/g,'');t.value=raw?(+raw).toLocaleString('vi-VN'):'';}});
-/* F-47 — tự đo số thao tác của chính hệ thống (chống R-01) */
-const session={taps:0,start:now()};
-document.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('button'))session.taps++;});
 let toastT;function toast(msg,err){const t=el('toast');t.style.display='block';t.textContent=msg;t.className='toast on'+(err?' err':'');clearTimeout(toastT);toastT=setTimeout(()=>t.className='toast',err?2600:1800);}
 /* toast kèm nút Hoàn tác — hiện sau khi nhập, cho sửa ngay */
 function toastUndo(msg){
@@ -2116,7 +2258,7 @@ function loadLocalOrSeed(){const saved=Store.load();window._cuMoi=false;
     DB.phienGio=DB.phienGio||[];DB.phieuThao=DB.phieuThao||[];cur=DB.settings.view||'don';}
   else{
     if(saved&&saved.don){try{localStorage.setItem('soxuong_v2_cu',JSON.stringify(saved));}catch(e){}window._cuMoi=true;}
-    seed();
+    seedDemo();
   }
   if(['home','thuchi','loinhuan'].includes(cur))cur='tongquan';
   if(!NAV.some(n=>n[0]===cur))cur='tongquan';}
