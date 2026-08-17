@@ -95,6 +95,8 @@ nav.bottom button.on{color:var(--cloth)}
 .btn-sm{padding:9px 12px;font-size:13px;border-radius:10px;width:auto}
 .fab{position:fixed;bottom:88px;left:0;right:0;max-width:460px;margin:0 auto;z-index:25;padding:0 14px;pointer-events:none}
 .fab .btn{pointer-events:auto;box-shadow:0 8px 24px rgba(27,42,74,.28)}
+.tho-toolbar{position:sticky;top:0;z-index:15;display:flex;gap:8px;background:var(--muslin);padding:10px 0;margin:0 0 8px;box-shadow:0 9px 10px -8px rgba(27,42,74,.14)}
+.tho-toolbar .btn{flex:1;white-space:nowrap;padding:12px 6px;font-size:13.5px}
 .kv{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line-2);gap:10px}
 .kv:last-child{border-bottom:none}
 .kv .k{color:var(--ink-2);font-size:13.5px}
@@ -591,7 +593,8 @@ function nhanVe({phieuId,dat,phe,den,cds,batches}){beginOp();
     if(bc.length!==full.length)rec.cds=bc.slice();
     p.dongNhan.push(rec);
     const slDat=sum(Object.values(bdat));
-    if(slDat>0){
+    const anSanPham=tho.isOwner||!(tho.loai==='bao'||tho.loai==='gio');
+    if(slDat>0&&anSanPham){
       const tienCong=slDat*donGiaCds(don,bc);
       ghi('Nhận hàng về ('+tenCds(don,bc)+')',[
         {tk:TK.WIP,chieu:'NO',soTien:tienCong,donId:don.id},
@@ -619,6 +622,32 @@ function chiPhiDon({donId,soTien,dienGiai}){beginOp();
   ghi('Chi phí đơn: '+dienGiai,[
     {tk:TK.WIP,chieu:'NO',soTien,donId,loai:'BAC_LO'},{tk:TK.QUY,chieu:'CO',soTien}]);
   Store.save();
+}
+/* Tiền xe giao hàng — thợ chạy giao (gắn hiệu suất thợ).
+   • Thợ sản phẩm / chủ xưởng: tiền xe = tiền công thật → WIP(bậc lô) / PHAI_TRA_THO (hoặc CONG_CHU_XUONG).
+     Vừa là chi phí của đơn, vừa cộng vào lương thợ — giống hệt cách nhận công đoạn.
+   • Thợ bao / giờ: KHÔNG ghi sổ (lương ngày đã trả rồi) — chỉ ghi 1 dòng giá trị vào
+     sổ công để đối chiếu hiệu suất với tiền bao. Không tạo chi phí ảo cho đơn. */
+function giaoXeTho({donId,thoId,soTien,dienGiai}){
+  DB.giaoCong=DB.giaoCong||[];
+  const tho=getTho(thoId);
+  const laSP=tho.isOwner||!(tho.loai==='bao'||tho.loai==='gio');
+  const rec={id:uid(),donId,thoId,soTien,ngay:now(),dienGiai:dienGiai||'',coButToan:laSP};
+  DB.giaoCong.push(rec);
+  if(laSP){beginOp();
+    const tkCong=tho.isOwner?TK.CONG_CHU_XUONG:TK.PHAI_TRA_THO;
+    ghi('Giao hàng — '+(dienGiai||'thợ chạy'),[
+      {tk:TK.WIP,chieu:'NO',soTien,donId,loai:'BAC_LO'},
+      {tk:tkCong,chieu:'CO',soTien,thoId:tho.isOwner?null:thoId}],{giaoCongId:rec.id});
+  }
+  Store.save();
+  return laSP;
+}
+/* gỡ 1 chuyến giao (chỉ dùng cho bản ghi KHÔNG bút toán — thợ bao/giờ) */
+function xoaGiaoCong(id){DB.giaoCong=DB.giaoCong||[];
+  const r=DB.giaoCong.find(x=>x.id===id);if(!r)return;
+  if(r.coButToan){toast('Chuyến này đã ghi sổ — hoàn tác trong Nhật ký nhập.',true);return;}
+  DB.giaoCong=DB.giaoCong.filter(x=>x.id!==id);Store.save();render();toast('Đã gỡ chuyến giao.');
 }
 /* tiền đền hàng hư (event #12) */
 function tienDen({donId,soTien}){beginOp();
@@ -799,7 +828,7 @@ function xoaTho(id){const t=getTho(id);if(!t)throw new Error('Không thấy th�
   if(thoCoViec(id))throw new Error('Thợ còn phiếu giao việc / chấm giờ — không xóa được.');
   if(thoCoSo(id))throw new Error('Thợ còn lương / lịch sử trong sổ — không xóa được. Trả hết lương rồi thử lại.');
   DB.tho=DB.tho.filter(x=>x.id!==id);Store.save();}
-function themTho(o){DB.tho.push({id:uid(),ten:o.ten,loai:o.loai,donGiaGio:o.donGiaGio||0});Store.save();}
+function themTho(o){DB.tho.push({id:uid(),ten:o.ten,loai:o.loai,donGiaGio:o.donGiaGio||0,donGiaNgay:o.donGiaNgay||0});Store.save();}
 function suaTho(id,patch){Object.assign(getTho(id),patch);Store.save();}
 function themMau(chuId,o){const c=getChu(chuId);c.mau=c.mau||[];
   c.mau.push({id:uid(),ten:o.ten,sizeList:o.sizeList,giaGiaCong:o.giaGiaCong||0,gioDinhMuc:o.gioDinhMuc||0,congDoan:o.congDoan,anh:o.anh||'',
@@ -1187,20 +1216,32 @@ function homeBody(){
 
 /* ---------- ĐƠN HÀNG ---------- */
 let donSearch='';
+let donTab=null; /* null = tự chọn mục đầu có đơn; 'dang'|'xong'|'huy' khi người dùng bấm */
 function donKhop(d){if(!donSearch)return true;const q=donSearch.toLowerCase();
   return (d.ma+' '+getChu(d.chuHangId).ten+' '+getMau(d.mauId).ten).toLowerCase().includes(q);}
 function viewDon(m){
   const dangChay=DB.don.filter(d=>['DANG_CHAY','DA_GIAO_MOT_PHAN','CHO_CHAM','BI_TRA_LAI'].includes(d.trangThai)&&donKhop(d));
   const xongRoi=DB.don.filter(d=>d.trangThai==='DA_GIAO_DU'&&donKhop(d));
   const huy=DB.don.filter(d=>d.trangThai==='DA_HUY'&&donKhop(d));
-  let h=`<div class="view-title">Đơn hàng<small>Hàng đang làm ở xưởng</small></div>`;
+  /* 2 mục riêng: Đang làm / Đã xong (thêm Đã hủy nếu có) — bấm mục nào hiện mục nấy */
+  const groups=[['dang','Đang làm',dangChay],['xong','Đã xong',xongRoi]];
+  if(huy.length)groups.push(['huy','Đã hủy',huy]);
+  let eff=donTab;
+  if(!eff||!groups.some(g=>g[0]===eff))eff=(groups.find(g=>g[2].length)||groups[0])[0];
+  const cur=groups.find(g=>g[0]===eff);
+  const sub=eff==='dang'?'Hàng đang làm ở xưởng':eff==='xong'?'Đơn đã giao xong':'Đơn đã hủy';
+  let h=`<div class="view-title">Đơn hàng<small>${sub}</small></div>`;
   if(DB.don.length>3||donSearch)h+=`<div class="field" style="margin-bottom:12px"><input id="don_q" placeholder="🔎 Tìm mã đơn, chủ hàng, mẫu..." value="${donSearch}" oninput="donSearch=this.value;const p=this.selectionStart;viewDon(document.getElementById('main'));const e=document.getElementById('don_q');if(e){e.focus();e.setSelectionRange(p,p);}"></div>`;
   if(!DB.don.length){h+=`<div class="empty"><div class="ic">🧵</div><b>Chưa có đơn nào</b>Tạo đơn đầu tiên khi nhận hàng cắt về.</div>`;}
-  else if(!dangChay.length&&!xongRoi.length&&!huy.length){h+=`<div class="empty"><div class="ic">🔎</div><b>Không tìm thấy đơn</b>Thử từ khóa khác.</div>`;}
   else{
-    h+=dangChay.map(donCard).join('');
-    if(xongRoi.length)h+=`<div class="section-h">Đơn đã xong</div>`+xongRoi.map(donCard).join('');
-    if(huy.length)h+=`<div class="section-h">Đơn đã hủy</div>`+huy.map(donCard).join('');
+    h+=`<div class="tabs" style="margin-bottom:12px">`+groups.map(([k,t,arr])=>`<button class="${eff===k?'on':''}" onclick="donTab='${k}';viewDon(document.getElementById('main'))">${t} <span style="opacity:.55;font-weight:700">${arr.length}</span></button>`).join('')+`</div>`;
+    const list=cur[2];
+    if(!list.length){
+      const ic=donSearch?'🔎':eff==='dang'?'✅':eff==='xong'?'📭':'🗑️';
+      const tt=donSearch?'Không tìm thấy đơn':eff==='dang'?'Không có đơn đang làm':eff==='xong'?'Chưa có đơn nào xong':'Không có đơn hủy';
+      const ss=donSearch?'Thử từ khóa khác.':eff==='dang'?'Mọi đơn đã xong hoặc chưa tạo.':'';
+      h+=`<div class="empty"><div class="ic">${ic}</div><b>${tt}</b>${ss}</div>`;
+    }else h+=list.map(donCard).join('');
   }
   m.innerHTML=h;
   el('fab').innerHTML=`<button class="btn btn-tape" onclick="modalTaoDon()">＋ Nhận hàng cắt mới</button>`;
@@ -1276,6 +1317,7 @@ function modalDon(id,tab){_nhanNhanhBack=false;_nnReturn=null;
       <div style="height:14px"></div>
       ${giaoDuoc>0?`<button class="btn btn-tape" onclick="modalGiaoTP('${id}')">📦 Giao ${giaoDuoc} cái cho chủ hàng</button><div style="height:8px"></div>`:''}
       ${giaoLuyKe>0?`<button class="btn btn-sage" onclick="confirmDongDon('${id}')">✅ Đóng đơn — xem lãi</button><div style="height:8px"></div>`:''}
+      <button class="btn btn-ghost" onclick="modalGiaoXe('${id}')">🚚 Tiền xe giao hàng</button><div style="height:8px"></div>
       <button class="btn btn-ghost" onclick="const d=el('donMore');d.style.display=d.style.display==='none'?'block':'none';this.textContent=d.style.display==='none'?'⋯ Thao tác khác':'⌃ Thu gọn'">⋯ Thao tác khác</button>
       <div id="donMore" style="display:none;margin-top:8px"><div class="act-grid">
         <button class="btn btn-ghost" onclick="modalChamGio('${id}')">⏱ Chấm giờ</button>
@@ -1371,14 +1413,14 @@ function submitTaoDon(){try{const mau=getMau(tdState.mauId);if(!mau)return toast
    false khi mở dạng sheet riêng (đường nvGuideGiao). */
 let gvState={},gvInline=false;
 function modalGiaoViec(donId){const don=getDon(donId);
-  if(!DB.tho.some(t=>t.loai==='sp')){toast('Chưa có thợ nào — thêm thợ ở màn Thợ trước đã.',true);return;}
-  const firstTho=DB.tho.find(t=>!t.isOwner&&t.loai==='sp')||DB.tho.find(t=>t.loai==='sp');
+  if(!DB.tho.some(t=>['sp','bao','gio'].includes(t.loai))){toast('Chưa có thợ nào — thêm thợ ở màn Thợ trước đã.',true);return;}
+  const firstTho=DB.tho.find(t=>!t.isOwner&&['sp','bao','gio'].includes(t.loai))||DB.tho.find(t=>['sp','bao','gio'].includes(t.loai));
   let sel=[];for(let n=0;n<don.snapshotCD.length;n++){if(tonCD(don,n)>0){sel=[n];break;}}
   gvState={donId,thoId:firstTho?firstTho.id:(DB.tho[0]&&DB.tho[0].id),sel,giao:{}};gvInline=false;gvFill();drawGiaoViec();}
 /* Khởi tạo state + trả HTML form giao để nhúng thẳng vào tab "Giao hàng". */
 function gvInlineInit(donId){const don=getDon(donId);
-  if(!DB.tho.some(t=>t.loai==='sp'))return `<div class="hint">Chưa có thợ sản phẩm — thêm ở màn <b>Thợ</b> rồi mới giao việc được.</div>`;
-  const firstTho=DB.tho.find(t=>!t.isOwner&&t.loai==='sp')||DB.tho.find(t=>t.loai==='sp');
+  if(!DB.tho.some(t=>['sp','bao','gio'].includes(t.loai)))return `<div class="hint">Chưa có thợ — thêm ở màn <b>Thợ</b> rồi mới giao việc được.</div>`;
+  const firstTho=DB.tho.find(t=>!t.isOwner&&['sp','bao','gio'].includes(t.loai))||DB.tho.find(t=>['sp','bao','gio'].includes(t.loai));
   let sel=[];for(let n=0;n<don.snapshotCD.length;n++){if(tonCD(don,n)>0){sel=[n];break;}}
   gvState={donId,thoId:firstTho?firstTho.id:(DB.tho[0]&&DB.tho[0].id),sel,giao:{}};gvInline=true;gvFill();
   return `<div id="gvHost">${gvBody()}</div>`;}
@@ -1389,7 +1431,7 @@ function gvMax(don,s){if(!gvState.sel.length)return 0;
 function gvFill(){const don=getDon(gvState.donId);gvState.giao={};
   sizesOf(don).forEach(s=>{const v=gvMax(don,s);if(v>0)gvState.giao[s]=v;});}
 function gvBody(){const don=getDon(gvState.donId);const sel=gvState.sel;const hasSel=sel.length>0;
-  const thoChips=DB.tho.filter(t=>t.loai==='sp').map(t=>`<div class="chip ${gvState.thoId===t.id?'sel':''}" onclick="gvPick('tho','${t.id}')">${t.isOwner?'🧑‍🔧 ':''}${t.ten}</div>`).join('');
+  const thoChips=DB.tho.filter(t=>['sp','bao','gio'].includes(t.loai)).map(t=>`<div class="chip ${gvState.thoId===t.id?'sel':''}" onclick="gvPick('tho','${t.id}')">${t.isOwner?'🧑‍🔧 ':''}${t.ten}${t.loai==='bao'?' <small>bao ngày</small>':t.loai==='gio'?' <small>bao giờ</small>':''}</div>`).join('');
   const cdChips=don.snapshotCD.map((c,n)=>{const t=tonCD(don,n);const on=sel.indexOf(n)>=0;
     const dim=(!on&&t<=0)?'style="opacity:.4"':'';
     return `<div class="chip ${on?'sel':''}" ${dim} onclick="gvPickCD(${n})">${n+1}.${c.ten}<small>${t>0?t+' chờ':'xong'}</small></div>`;}).join('');
@@ -1975,10 +2017,10 @@ function moNhanNhanh(){const gs=nhanNhanhScan();
   openSheet('⚡ Nhận nhanh',h);if(_nnReturn)_sheetClose=nnThoat;}
 
 /* ---------- Thợ giờ ---------- */
-function modalChamGio(donId){const gioTho=DB.tho.filter(t=>t.loai==='gio');
+function modalChamGio(donId,preThoId){const gioTho=DB.tho.filter(t=>t.loai==='gio');
   if(!gioTho.length)return toast('Chưa có thợ tính giờ trong Cài đặt > Danh mục.',true);
   openSheet('Chấm giờ thợ',`
-    <div class="field"><label>Thợ (tính giờ)</label><select id="cg_tho">${gioTho.map(t=>`<option value="${t.id}">${t.ten} · ${fmt(t.donGiaGio)}/giờ</option>`).join('')}</select></div>
+    <div class="field"><label>Thợ (tính giờ)</label><select id="cg_tho">${gioTho.map(t=>`<option value="${t.id}"${preThoId===t.id?' selected':''}>${t.ten} · ${fmt(t.donGiaGio)}/giờ</option>`).join('')}</select></div>
     <div class="field"><label>Số giờ làm cho đơn này</label><div class="stepper"><button onclick="stepIn('cg_gio',-1)">−</button>
       <input type="number" id="cg_gio" value="1" step="0.5" onfocus="this.select()"><button onclick="stepIn('cg_gio',1)">＋</button></div>
       <div class="hint">Tiền công giờ tính vào chi phí <b>cả lô</b>, không chia theo từng cái.</div></div>
@@ -1997,6 +2039,41 @@ function modalChiPhiDon(donId){openSheet('Chi phí cho đơn này',`
 function submitChiPhiDon(donId){try{const s=numVal('cpd_sl'),dg=el('cpd_dg').value||'chi phí đơn';
   if(s<=0)return toast('Nhập số tiền.',true);chiPhiDon({donId,soTien:s,dienGiai:dg});
   closeSheet();render();modalDon(donId);toastUndo('Đã ghi chi phí cho đơn.');}catch(e){toast(e.message,true)}}
+/* ---- Tiền xe giao hàng (chọn người giao) ---- */
+let _gxTho='';
+function modalGiaoXe(donId){_gxTho='';
+  const chips=`<div class="chip sel" id="gx_c_" onclick="gxPickTho('','${donId}')">🛵 Book xe ngoài</div>`+
+    DB.tho.filter(t=>t.isOwner||['sp','bao','gio'].includes(t.loai)).map(t=>{
+      const tag=t.isOwner?'chủ xưởng':(t.loai==='bao'?'bao ngày':t.loai==='gio'?'bao giờ':'sản phẩm');
+      return `<div class="chip" id="gx_c_${t.id}" onclick="gxPickTho('${t.id}','${donId}')">${t.isOwner?'🧑‍🔧 ':''}${t.ten} <small>${tag}</small></div>`;}).join('');
+  openSheet('Tiền xe giao hàng',`
+    <div class="field"><label>Số tiền xe</label><input type="text" inputmode="numeric" class="sep" id="gx_sl" value="0" onfocus="this.select()"></div>
+    <div class="field"><label>Ghi chú (không bắt buộc)</label><input id="gx_dg" placeholder="VD: giao đợt 1"></div>
+    <div class="field"><label>Ai giao</label><div class="chipset" id="gx_chips">${chips}</div></div>
+    <div class="hint" id="gx_hint" style="margin-bottom:14px">🛵 <b>Book xe ngoài</b>: trừ thẳng tiền mặt vào đơn.</div>
+    <button class="btn btn-primary" onclick="submitGiaoXe('${donId}')">Ghi tiền xe</button>`);}
+function gxPickTho(id,donId){_gxTho=id;
+  document.querySelectorAll('#gx_chips .chip').forEach(c=>c.classList.remove('sel'));
+  const sel=el('gx_c_'+id);if(sel)sel.classList.add('sel');
+  const t=id?getTho(id):null;const hint=el('gx_hint');if(!hint)return;
+  if(!t)hint.innerHTML='🛵 <b>Book xe ngoài</b>: trừ thẳng tiền mặt vào đơn.';
+  else if(t.isOwner)hint.innerHTML='🧑‍🔧 <b>Chủ xưởng giao</b>: tính là công của chủ, gắn chi phí vào đơn.';
+  else if(t.loai==='bao'||t.loai==='gio')hint.innerHTML=`<b>Thợ bao/giờ</b>: lương ngày đã trả rồi nên <b>không</b> cộng thêm tiền — chỉ ghi vào sổ công để đối chiếu <b>hiệu suất</b> với tiền bao.`;
+  else hint.innerHTML='<b>Thợ sản phẩm</b>: tiền xe cộng thẳng vào lương thợ, đồng thời là chi phí của đơn.';}
+function submitGiaoXe(donId){try{const s=numVal('gx_sl'),dg=el('gx_dg').value.trim();
+  if(s<=0)return toast('Nhập số tiền.',true);
+  if(!_gxTho){chiPhiDon({donId,soTien:s,dienGiai:'Giao hàng'+(dg?' · '+dg:'')});
+    closeSheet();render();modalDon(donId);toastUndo('Đã ghi tiền xe giao hàng.');return;}
+  const laSP=giaoXeTho({donId,thoId:_gxTho,soTien:s,dienGiai:dg});
+  const ten=getTho(_gxTho).ten;
+  if(laSP){closeSheet();render();modalDon(donId);toastUndo('Đã ghi tiền xe — cộng lương '+ten+'.');}
+  else{const rec=DB.giaoCong[DB.giaoCong.length-1];closeSheet();render();modalDon(donId);
+    toastGoGiao('Đã ghi hiệu suất giao hàng cho '+ten+'.',rec.id);}
+}catch(e){toast(e.message,true)}}
+/* toast có nút gỡ cho bản ghi giao không bút toán (thợ bao/giờ) */
+function toastGoGiao(msg,id){const t=el('toast');if(!t)return;t.style.display='flex';t.style.alignItems='center';t.style.justifyContent='center';t.style.gap='6px';
+  t.innerHTML=`<span>${msg}</span><button onclick="xoaGiaoCong('${id}')" style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.4);color:#fff;font-weight:700;padding:6px 12px;border-radius:9px;font-size:13px;white-space:nowrap">↩ Gỡ</button>`;
+  t.className='toast on';clearTimeout(toastT);toastT=setTimeout(()=>{t.className='toast';},6000);}
 function modalTienDen(donId){openSheet('Tiền đền hàng hư',`
   <div class="field"><label>Số tiền đền cho chủ hàng / thợ khác</label><input type="text" inputmode="numeric" class="sep" id="td_sl" value="0" onfocus="this.select()"></div>
   <div class="hint" style="margin-bottom:14px">Đây là chi phí thật khi làm hư hàng, tính vào giá vốn của đơn.</div>
@@ -2070,14 +2147,27 @@ function submitGiaoTP(donId){try{const don=getDon(donId);const sizes={};sizesOf(
   giaoThanhPham({donId,sizes});closeSheet();render();modalDon(donId);toastUndo('Đã giao hàng, ghi công nợ.');}catch(e){toast(e.message,true)}}
 
 /* ---------- Đóng đơn / hủy / trả lại ---------- */
+/* thợ tính giờ đã nhận việc ở đơn này nhưng CHƯA nhập số giờ cho đơn (lãi sẽ thiếu tiền công nếu đóng) */
+function thoGioThieuGio(don){
+  const ids=[...new Set(DB.phieuGiao.filter(p=>p.donId===don.id&&p.trangThai!=='HUY').map(p=>p.thoId))]
+    .filter(id=>{const t=getTho(id);return t&&t.loai==='gio';});
+  return ids.filter(id=>!(DB.phienGio||[]).some(x=>x.donId===don.id&&x.thoId===id)).map(id=>getTho(id));
+}
 function confirmDongDon(donId){const don=getDon(donId);const conLai=coTheGiaoTong(don);
   const hutChuaRo=DB.phieuGiao.filter(p=>p.donId===donId&&p.lyDoHut==='Hụt chưa rõ'&&p.hut>0);
   const soChuaRo=sum(hutChuaRo.map(p=>p.hut));
+  const thieuGio=thoGioThieuGio(don);const tenGio=thieuGio.map(t=>t.ten).join(', ');
+  const closeBlock=thieuGio.length?
+    `<div style="display:flex;flex-direction:column;gap:8px">${thieuGio.map(t=>`<button class="btn btn-tape" onclick="modalChamGio('${donId}','${t.id}')">⏱️ Nhập giờ cho ${t.ten}</button>`).join('')}</div>
+     <div style="height:10px"></div>
+     <button class="btn btn-ghost btn-sm" style="width:100%" onclick="xacNhan('Đóng đơn khi chưa nhập giờ cho ${tenGio}? Tiền công thợ giờ sẽ KHÔNG được tính vào lãi của đơn này.',()=>doDongDon('${donId}'),{title:'Bỏ qua giờ thợ?',ok:'Đóng luôn',nguyHiem:true})">Vẫn đóng — bỏ qua giờ thợ</button>`
+    :`<button class="btn btn-sage" onclick="doDongDon('${donId}')">✅ Đóng đơn & xem lãi</button>`;
   openSheet('Đóng đơn '+don.ma,`
+    ${thieuGio.length?`<div class="warn-box" style="background:var(--thread-soft);border-color:var(--thread);color:var(--thread)">⏱️ Đơn có <b>thợ tính giờ chưa nhập số giờ</b>: <b>${tenGio}</b>. Nhập giờ trước khi đóng, nếu không lãi sẽ <b>thiếu tiền công thợ</b> (lãi ảo).</div>`:''}
     ${soChuaRo>0?`<div class="warn-box" style="background:var(--thread-soft);border-color:var(--thread);color:var(--thread)">⚠ Còn <b>${soChuaRo} cái "hụt chưa rõ"</b> chưa kết luận. Nên xác định châm bù hay chấp nhận là phế trước khi đóng (I-09).</div>`:''}
     <div class="warn-box">${conLai>0?`Còn <b>${conLai} cái</b> đã xong chưa giao. Đóng đơn = không giao số này nữa.`:'Tất cả hàng đã giao. Sẵn sàng chốt lãi.'}</div>
     <div class="hint" style="margin-bottom:16px">Sau khi đóng, đơn khóa lại và hiện <b>lãi ròng ước tính</b>.</div>
-    <button class="btn btn-sage" onclick="doDongDon('${donId}')">✅ Đóng đơn & xem lãi</button>`);}
+    ${closeBlock}`);}
 function doDongDon(donId){const l=dongDon(donId);closeSheet();render();
   openSheet('🎉 Đơn đã xong',`
     <div class="reveal"><div class="lbl">Lãi ròng ước tính</div><div class="amt">${fmt(l.lai)}</div>
@@ -2333,29 +2423,48 @@ function mcUse(){if(!_mcExpr){closeSheet();return;}
 
 /* ---------- THỢ ---------- */
 function viewTho(m){
-  let h=`<div class="view-title">Thợ<small>Lương · năng suất · tạm ứng</small></div>`;
-  {const nn=nhanNhanhCount();if(nhanNhanhCoViec())h+=`<button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="moNhanNhanh()">⚡ Nhận nhanh — ${nn>0?nn+' công đoạn đủ điều kiện nhận':'xem công đoạn đang chờ'}</button>`;}
   const thoList=DB.tho.filter(t=>!t.isOwner);
   const tongNo=sum(thoList.map(t=>Math.max(0,luongNoTho(t.id))));
+  let h=`<div class="tho-toolbar" id="thoBar">
+    <button class="btn btn-tape" onclick="modalThemTho()">＋ Thêm thợ</button>
+    <button class="btn btn-ghost" onclick="modalSoCong('')">📋 Rà công</button>
+    <button class="btn btn-tape" onclick="modalChotSo('')">🧾 Chốt sổ</button></div>`;
   if(tongNo>0)h+=`<button class="btn btn-sage" style="margin-bottom:12px" onclick="confirmTraHet()">💵 Trả hết lương đang nợ (${fmt(tongNo)})</button>`;
-  h+=`<div class="act-grid" style="margin-bottom:12px"><button class="btn btn-ghost" onclick="modalSoCong('')">📋 Bảng sổ công</button><button class="btn btn-tape" onclick="modalChotLuong('')">🧾 Chốt lương</button></div>`;
-  h+=DB.tho.map(t=>{const no=t.isOwner?0:luongNoTho(t.id);const ns=nangSuat(t.id);
+  const _rows=DB.tho.map(t=>({t,ct:t.isOwner?-Infinity:thoConThieu(t)})).sort((a,b)=>b.ct-a.ct);
+  h+=_rows.map(({t,ct})=>{const no=t.isOwner?0:ct;const est=(t.loai==='bao'||t.loai==='gio');const ns=nangSuat(t.id);
+    let right;
+    if(t.isOwner){
+      right=`<div style="font-size:11px;color:var(--ink-3)">công đã tính<br>vào lãi</div>`;
+    }else if(est&&ns.tongCai>0){
+      /* thợ bao/giờ có làm công đoạn: đối chiếu năng suất (giá trị công đoạn) vs tiền bao thực trả */
+      const cd=ns.congSP;const bao=tienTraBao(t);const nợ=Math.max(0,no);
+      const chuaGio=(t.loai==='gio'&&ns.tongGio===0);
+      const dl=cd-bao;
+      right=`<div class="big-num" style="color:var(--sage)">${fmt(cd)}</div>
+        <div style="font-size:10px;color:var(--ink-3);letter-spacing:.02em">công đoạn (năng suất)</div>
+        <div style="font-size:13px;font-weight:800;margin-top:5px;color:${chuaGio?'var(--ink-3)':dl>=0?'var(--ink-2)':'var(--thread)'}">/ ${chuaGio?'—':fmt(bao)}</div>
+        <div style="font-size:10px;color:var(--ink-3)">${chuaGio?'chưa chấm giờ':t.loai==='bao'?'tiền bao ngày':'tiền giờ'}${nợ>0?' · nợ '+fmtShort(nợ):''}</div>`;
+    }else{
+      right=`<div class="big-num ${no>0?'money-neg':no<0?'money-pos':''}">${no?((no>0&&est?'~':'')+fmt(no)):'—'}</div><div style="font-size:11px;margin-top:2px">${no>0?(est?'tạm tính':'còn nợ'):no<0?'ứng dư':'xong'}</div>`;
+    }
     return `<div class="order-card" onclick="modalThoChiTiet('${t.id}')"><div class="oc-head">
       <div><div class="oc-ma">${t.isOwner?'🧑‍🔧 ':''}${t.ten}</div>
-        <div class="oc-cust">${t.isOwner?'Chủ xưởng':t.loai==='gio'?'Tính giờ · '+fmt(t.donGiaGio)+'/h':'Tính sản phẩm'} · đã làm ${ns.tongCai} cái${ns.tongGio?' · '+ns.tongGio+'h':''}</div></div>
-      <div class="oc-qty">${t.isOwner?`<div style="font-size:11px;color:var(--ink-3)">công đã tính<br>vào lãi</div>`
-        :`<div class="big-num ${no>0?'money-neg':no<0?'money-pos':''}">${no?fmt(no):'—'}</div><div style="font-size:11px;margin-top:2px">${no>0?'còn nợ':no<0?'ứng dư':'xong'}</div>`}</div></div></div>`;}).join('');
+        <div class="oc-cust">${t.isOwner?'Chủ xưởng':thoLoaiTen(t)} · đã làm ${ns.tongCai} cái${ns.tongGio?' · '+ns.tongGio+'h':''}</div></div>
+      <div class="oc-qty">${right}</div></div></div>`;}).join('');
   m.innerHTML=h;
-  el('fab').innerHTML=`<button class="btn btn-tape" onclick="modalThemTho()">＋ Thêm thợ</button>`;
+  el('fab').innerHTML='';
+  const hb=document.querySelector('header.top'),tb=el('thoBar');if(hb&&tb)tb.style.top=(hb.offsetHeight-1)+'px';
 }
 function nangSuat(thoId){
   const ps=DB.phieuGiao.filter(p=>p.thoId===thoId&&p.trangThai!=='HUY');
-  let tongCai=0,tongCong=0,tongPhe=0;
-  ps.forEach(p=>{const don=getDon(p.donId);
-    const dat=pDat(p);tongCai+=dat;tongCong+=congPhieu(p);tongPhe+=pPhe(p);});
-  const pg=DB.phienGio.filter(x=>x.thoId===thoId);const tongGio=sum(pg.map(x=>x.gio));tongCong+=sum(pg.map(x=>x.tien));
-  return {tongCai,tongCong,tongPhe,tongGio};
+  let tongCai=0,congSP=0,tongPhe=0;
+  ps.forEach(p=>{const dat=pDat(p);tongCai+=dat;congSP+=congPhieu(p);tongPhe+=pPhe(p);});
+  const pg=DB.phienGio.filter(x=>x.thoId===thoId);const tongGio=sum(pg.map(x=>x.gio));const tienGio=sum(pg.map(x=>x.tien));
+  return {tongCai,congSP,tienGio,tongCong:congSP+tienGio,tongPhe,tongGio};
 }
+/* tiền lương bao thực trả (để đối chiếu với giá trị công đoạn) — bao: giá ngày × số ngày; giờ: tổng tiền giờ đã chấm */
+function tienTraBao(t){const ns=nangSuat(t.id);
+  return t.loai==='bao'?(t.donGiaNgay||0)*soNgayBao(t.id,0):t.loai==='gio'?ns.tienGio:0;}
 function congThoEvents(thoId){
   const ev=[];
   DB.phieuGiao.filter(p=>p.thoId===thoId&&p.trangThai!=='HUY').forEach(p=>{
@@ -2368,6 +2477,8 @@ function congThoEvents(thoId){
   (DB.phieuThao||[]).forEach(pt=>{const don=getDon(pt.donId);
     (pt.dong||[]).forEach(l=>{if(l.thoId!==thoId||l.aiChiu==='THO')return;const tien=l.sl*l.donGia;if(tien<=0)return;
       ev.push({ngay:pt.ngay,don:don?don.ma:'—',mo:'Tháo · '+(don?don.snapshotCD[l.congDoanIdx].ten:''),soCai:l.sl,tien});});});
+  (DB.giaoCong||[]).filter(g=>g.thoId===thoId).forEach(g=>{const don=getDon(g.donId);
+    ev.push({ngay:g.ngay,don:don?don.ma:'—',mo:'🚚 Giao hàng'+(g.dienGiai?' · '+g.dienGiai:''),soCai:0,tien:g.soTien,giaoCongId:g.id,laGiao:true,coButToan:g.coButToan});});
   ev.sort((a,b)=>a.ngay-b.ngay);
   let tra=bal(TK.PHAI_TRA_THO,d=>d.thoId===thoId).no; // đã trả + ứng
   ev.forEach(e=>{if(tra>=e.tien){e.daTinh=true;tra-=e.tien;}else{e.daTinh=false;if(tra>0){e.tinhMotPhan=tra;tra=0;}}});
@@ -2429,6 +2540,102 @@ function modalChotLuong(thoId){
 }
 function submitChotLuong(thoId){try{const val=numVal('cl_sl');if(val<=0)return toast('Nhập số tiền.',true);
   traLuong({thoId,soTien:val});closeSheet();render();toast('Đã chốt & ghi trả lương.');}catch(e){toast(e.message,true)}}
+/* ================= Sổ công của thợ (kiểu Kế mục) + Chốt sổ 3 cách ================= */
+function thoLoaiTen(t){return t.loai==='gio'?'Bao giờ · '+fmt(t.donGiaGio)+'/h':t.loai==='bao'?'Bao ngày · '+fmt(t.donGiaNgay)+'/ngày':'Tính sản phẩm';}
+/* Tiền xưởng còn thiếu thợ — gồm phần đã ghi nợ (PHAI_TRA_THO) + ước tính kỳ chưa chốt cho thợ bao/giờ */
+function thoConThieu(t){let no=luongNoTho(t.id);const wm=baoWatermark(t.id);
+  if(t.loai==='bao')no+=(t.donGiaNgay||0)*soNgayBao(t.id,wm);
+  else if(t.loai==='gio')no+=(t.donGiaGio||0)*soGioChua(t.id,wm);
+  return no;}
+function baoWatermark(thoId){DB.chotBao=DB.chotBao||[];const cs=DB.chotBao.filter(c=>c.thoId===thoId);
+  return cs.length?Math.max(...cs.map(c=>c.denNgay||c.ngay||0)):0;}
+/* gộp công đoạn thợ đã làm theo NGÀY -> [{ngay,label,lines:[{mo,sl,dg,tt}],tong}] */
+function soCongNgay(thoId,tuNgay){const ev=congThoEvents(thoId).filter(e=>e.ngay>(tuNgay||0));const map={};
+  ev.forEach(e=>{const key=new Date(e.ngay).toLocaleDateString('vi-VN');
+    (map[key]=map[key]||{ngay:e.ngay,label:key,lines:[],tong:0});
+    const dg=e.soCai>0?Math.round(e.tien/e.soCai):e.tien;
+    map[key].lines.push({mo:(e.don?e.don+' · ':'')+e.mo,sl:e.soCai||0,dg,tt:e.tien,giaoCongId:e.giaoCongId,xoaDuoc:e.laGiao&&!e.coButToan});
+    map[key].tong+=e.tien;});
+  return Object.values(map).sort((a,b)=>a.ngay-b.ngay);}
+function soCongTong(thoId,tuNgay){return sum(congThoEvents(thoId).filter(e=>e.ngay>(tuNgay||0)).map(e=>e.tien));}
+function soNgayBao(thoId,tuNgay){const set=new Set();
+  congThoEvents(thoId).filter(e=>e.ngay>(tuNgay||0)&&e.soCai>0).forEach(e=>set.add(new Date(e.ngay).toLocaleDateString('vi-VN')));
+  return set.size;}
+function soGioChua(thoId,tuNgay){return sum((DB.phienGio||[]).filter(x=>x.thoId===thoId&&x.ngay>(tuNgay||0)).map(x=>x.gio));}
+function modalSoCongTho(thoId){const t=getTho(thoId);const days=soCongNgay(thoId,0);const grand=soCongTong(thoId,0);
+  let h=`<div class="hint" style="margin:-4px 0 10px">Sổ công tự sinh từ giao–nhận — không nhập tay. Mỗi dòng: công đoạn · số lượng × đơn giá.</div>`;
+  if(!days.length)h+=`<div class="divider-note" style="padding:16px">Chưa có công đoạn nào.</div>`;
+  days.forEach(d=>{h+=`<div class="card" style="margin-bottom:10px"><div class="card-pad"><b style="font-size:14px">${d.label}</b>`;
+    d.lines.forEach(ln=>{h+=`<div style="display:flex;align-items:center;gap:6px;margin-top:7px;font-size:13px">
+      <span style="flex:1;min-width:0;color:var(--ink-2)">${ln.mo}</span>
+      ${ln.sl?`<span style="white-space:nowrap"><b>${fmt(ln.sl)}</b> <span style="color:var(--ink-3)">×</span> ${fmt(ln.dg)}</span>`:''}
+      <b style="min-width:74px;text-align:right">${fmt(ln.tt)}</b>
+      ${ln.xoaDuoc?`<button onclick="xoaGiaoCong('${ln.giaoCongId}')" style="border:none;background:none;color:var(--rose,#c0392b);font-size:15px;padding:0 2px;cursor:pointer">✕</button>`:''}</div>`;});
+    h+=`<div class="kv" style="margin-top:8px;border-top:1px dashed var(--line-2);padding-top:8px"><div class="k">Tổng ${d.label}</div><div class="v big-num">${fmt(d.tong)}</div></div></div></div>`;});
+  h+=`<div class="reveal" style="background:linear-gradient(160deg,#2F7A63,#256452);margin-bottom:12px"><div class="lbl" style="color:#CDEBE0">Giá trị công đoạn — tổng cộng</div><div class="amt">${fmt(grand)}</div></div>`;
+  h+=`<button class="btn btn-tape" style="width:100%" onclick="closeSheet();setTimeout(()=>modalChotSo('${thoId}'),120)">🧾 Chốt sổ tính lương</button>`;
+  openSheet('Sổ công · '+t.ten,h);}
+/* ---- Chốt sổ theo 3 cách: sản phẩm / bao ngày / theo giờ ---- */
+let csState={},_csGiaTri=0;
+function modalChotSo(thoId){DB.chotBao=DB.chotBao||[];
+  if(!thoId){const list=DB.tho.filter(t=>!t.isOwner);
+    if(!list.length)return toast('Chưa có thợ.',true);
+    return openSheet('Chốt sổ — chọn thợ',`<div class="card">`+list.map(t=>{const no=luongNoTho(t.id);
+      return `<div class="slip" onclick="closeSheet();setTimeout(()=>modalChotSo('${t.id}'),120)"><div><div class="who">${t.ten}</div><div class="meta">${thoLoaiTen(t)}</div></div><div class="big-num ${no>0?'money-neg':''}">${no>0?fmt(no):'›'}</div></div>`;}).join('')+`</div>`);}
+  const t=getTho(thoId);csState={thoId,kieu:(t.loai==='bao'||t.loai==='gio')?t.loai:'sp'};drawChotSo();}
+function csPick(k){csState.kieu=k;drawChotSo();}
+function drawChotSo(){const t=getTho(csState.thoId);const wm=baoWatermark(csState.thoId);
+  const giaTri=soCongTong(csState.thoId,wm);_csGiaTri=giaTri;const kieu=csState.kieu;
+  const modes=[['sp','Sản phẩm'],['bao','Bao ngày'],['gio','Theo giờ']];
+  let h=`<div class="hint" style="margin:-4px 0 8px">Chọn cách tính lương kỳ này. Giá trị công đoạn kỳ chưa chốt = <b>${fmt(giaTri)}</b> (dùng để đối chiếu với thợ bao).</div>`;
+  h+=`<div class="chipset" style="margin-bottom:10px">`+modes.map(([k,l])=>`<div class="chip ${kieu===k?'sel':''}" onclick="csPick('${k}')">${l}</div>`).join('')+`</div>`;
+  h+=`<button class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:10px" onclick="closeSheet();setTimeout(()=>modalSoCongTho('${csState.thoId}'),120)">📋 Xem sổ công chi tiết</button>`;
+  if(kieu==='sp'){const no=luongNoTho(csState.thoId);
+    h+=`<div class="card"><div class="card-pad"><div class="kv"><div class="k">Lương phải trả = giá trị công đoạn</div><div class="v big-num money-neg">${fmt(Math.max(0,no))}</div></div></div></div>
+      <div class="field"><label>Số tiền trả kỳ này</label><input type="text" inputmode="numeric" class="sep" id="cs_tra" value="${sepStr(Math.max(0,no))}" onfocus="this.select()"></div>
+      <button class="btn btn-sage wide" onclick="submitChotSoSP('${csState.thoId}')">Chốt & ghi đã trả</button>`;
+  } else if(kieu==='bao'){const ngay=soNgayBao(csState.thoId,wm);
+    h+=`<div class="card"><div class="card-pad">
+      <div style="display:flex;gap:8px"><div class="field" style="margin:0;flex:1"><label>Đơn giá / ngày</label><input type="text" inputmode="numeric" class="sep" id="cs_dg" value="${sepStr(t.donGiaNgay||0)}" oninput="csCalc()" onfocus="this.select()"></div>
+      <div class="field" style="margin:0;flex:1"><label>Số ngày (tự đếm)</label><input type="text" inputmode="numeric" id="cs_dv" value="${ngay}" oninput="csCalc()" onfocus="this.select()"></div></div>
+      <div class="kv" style="margin-top:8px"><div class="k">Lương bao phải trả</div><div class="v big-num money-neg" id="cs_pay">0</div></div>
+      <div class="kv"><div class="k">Giá trị công đoạn (đối chiếu)</div><div class="v">${fmt(giaTri)}</div></div>
+      <div class="kv"><div class="k" id="cs_cl_k">Chênh lệch</div><div class="v" id="cs_cl">0</div></div></div></div>
+      <div class="field"><label>Số tiền trả kỳ này</label><input type="text" inputmode="numeric" class="sep" id="cs_tra" oninput="this.dataset.touched=1" onfocus="this.select()"></div>
+      <button class="btn btn-sage wide" onclick="submitChotSoBao('${csState.thoId}','bao')">Chốt & ghi đã trả</button>`;
+  } else {const gioMac=soGioChua(csState.thoId,wm);
+    h+=`<div class="card"><div class="card-pad">
+      <div style="display:flex;gap:8px"><div class="field" style="margin:0;flex:1"><label>Đơn giá / giờ</label><input type="text" inputmode="numeric" class="sep" id="cs_dg" value="${sepStr(t.donGiaGio||0)}" oninput="csCalc()" onfocus="this.select()"></div>
+      <div class="field" style="margin:0;flex:1"><label>Tổng giờ</label><input type="text" inputmode="numeric" id="cs_dv" value="${gioMac||''}" placeholder="nhập giờ" oninput="csCalc()" onfocus="this.select()"></div></div>
+      <div class="kv" style="margin-top:8px"><div class="k">Lương phải trả</div><div class="v big-num money-neg" id="cs_pay">0</div></div>
+      <div class="kv"><div class="k">Giá trị công đoạn (đối chiếu)</div><div class="v">${fmt(giaTri)}</div></div>
+      <div class="kv"><div class="k" id="cs_cl_k">Chênh lệch</div><div class="v" id="cs_cl">0</div></div></div></div>
+      <div class="field"><label>Số tiền trả kỳ này</label><input type="text" inputmode="numeric" class="sep" id="cs_tra" oninput="this.dataset.touched=1" onfocus="this.select()"></div>
+      <button class="btn btn-sage wide" onclick="submitChotSoBao('${csState.thoId}','gio')">Chốt & ghi đã trả</button>`;
+  }
+  openSheet('Chốt sổ · '+t.ten,h);if(kieu!=='sp')csCalc();}
+function csCalc(){const dg=numVal('cs_dg');const dvE=el('cs_dv');const dv=dvE?(+((''+dvE.value).replace(/[^\d]/g,''))||0):0;
+  const pay=Math.round(dg*dv);const pe=el('cs_pay');if(pe)pe.textContent=fmt(pay);
+  const tr=el('cs_tra');if(tr&&!tr.dataset.touched)tr.value=sepStr(pay);
+  const cl=_csGiaTri-pay;const ce=el('cs_cl');if(ce){ce.textContent=(cl>=0?'+':'')+fmt(cl);ce.className='v '+(cl>=0?'money-pos':'money-neg');}
+  const ck=el('cs_cl_k');if(ck)ck.textContent=cl>=0?'Chênh lệch — làm dư hơn tiền bao (lời)':'Chênh lệch — làm ít hơn tiền bao (lỗ)';}
+function submitChotSoSP(thoId){try{const val=numVal('cs_tra');if(val<=0)return toast('Nhập số tiền.',true);
+  traLuong({thoId,soTien:val});closeSheet();render();toast('Đã chốt & ghi trả lương.');}catch(e){toast(e.message,true)}}
+function submitChotSoBao(thoId,kieu){try{
+  const dg=numVal('cs_dg');const dvE=el('cs_dv');const dv=dvE?(+((''+dvE.value).replace(/[^\d]/g,''))||0):0;
+  const pay=Math.round(dg*dv);const tra=numVal('cs_tra');
+  if(pay<=0)return toast('Nhập đơn giá và số '+(kieu==='bao'?'ngày':'giờ')+'.',true);
+  if(tra>pay+Math.max(0,luongNoTho(thoId)))return toast('Tiền trả nhiều hơn mức phải trả.',true);
+  chotSoBao({thoId,kieu,donGia:dg,soDVi:dv,payable:pay,giaTriCD:_csGiaTri,tienTra:tra});
+  closeSheet();render();toast('Đã chốt sổ & ghi lương bao.');}catch(e){toast(e.message,true)}}
+function chotSoBao({thoId,kieu,donGia,soDVi,payable,giaTriCD,tienTra}){DB.chotBao=DB.chotBao||[];beginOp();
+  if(payable>0)ghi('Chốt lương '+(kieu==='bao'?'bao ngày':'theo giờ')+' ('+getTho(thoId).ten+')',[
+    {tk:TK.RO_CHUNG,chieu:'NO',soTien:payable},
+    {tk:TK.PHAI_TRA_THO,chieu:'CO',soTien:payable,thoId}]);
+  if(tienTra>0)ghi('Trả lương thợ',[
+    {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien:tienTra,thoId},{tk:TK.QUY,chieu:'CO',soTien:tienTra}]);
+  DB.chotBao.push({id:uid(),thoId,kieu,ngay:now(),denNgay:now(),donGia,soDVi,payable,giaTriCD,tienTra});
+  Store.save();}
 function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
   if(t.isOwner){openSheet(t.ten,`
     <div class="card"><div class="card-pad">
@@ -2445,13 +2652,17 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
     ${no<0?`<button class="btn btn-danger wide" onclick="if(confirm('Thợ đã ứng dư '+fmt(${-no})+'. Nếu nghỉ không đòi lại được sẽ ghi thành lỗ. Xác nhận xóa?')){xoaUngTho({thoId:'${id}',soTien:${-no}});closeSheet();render();toast('Đã xóa số dư ứng.');}">Thợ nghỉ việc — xóa ứng dư</button>`:''}</div>`;
   const gGiu=nhomPhieuCuaTho(id);
   if(gGiu)h+=`<div class="section-h">Đang giữ · ${gGiu.soViec} việc · ${gGiu.conLai} cái</div><div class="card">${theNhomPhieu(gGiu,'')}</div>`;
-  const ev=congThoEvents(id);const chua=ev.filter(e=>!e.daTinh);const roi=ev.filter(e=>e.daTinh);
-  const chuaTong=sum(chua.map(e=>e.tien-(e.tinhMotPhan||0)));
-  h+=`<div class="card"><div class="card-pad">
-    <div class="kv"><div class="k">Công chưa tính sổ</div><div class="v money-neg">${fmt(chuaTong)} · ${chua.length} mục</div></div>
-    <div class="kv"><div class="k">Công đã tính sổ</div><div class="v">${roi.length} mục</div></div></div></div>`;
-  h+=`<div class="act-grid"><button class="btn btn-ghost" onclick="modalSoCong('${id}')">📋 Mở bảng sổ công</button>
-    <button class="btn btn-tape" onclick="modalChotLuong('${id}')">🧾 Chốt lương kỳ</button></div>`;
+  if(t.loai==='bao'||t.loai==='gio'){const wm=baoWatermark(id);const gt=soCongTong(id,wm);
+    h+=`<div class="card"><div class="card-pad">
+      <div class="kv"><div class="k">Giá trị công đoạn (chưa chốt)</div><div class="v">${fmt(gt)}</div></div>
+      <div class="kv"><div class="k">${t.loai==='bao'?'Số ngày chưa chốt':'Số giờ (chấm giờ) chưa chốt'}</div><div class="v">${t.loai==='bao'?soNgayBao(id,wm)+' ngày':soGioChua(id,wm)+' h'}</div></div></div></div>`;
+  } else {const ev=congThoEvents(id);const chua=ev.filter(e=>!e.daTinh);const roi=ev.filter(e=>e.daTinh);
+    const chuaTong=sum(chua.map(e=>e.tien-(e.tinhMotPhan||0)));
+    h+=`<div class="card"><div class="card-pad">
+      <div class="kv"><div class="k">Công chưa tính sổ</div><div class="v money-neg">${fmt(chuaTong)} · ${chua.length} mục</div></div>
+      <div class="kv"><div class="k">Công đã tính sổ</div><div class="v">${roi.length} mục</div></div></div></div>`;}
+  h+=`<div class="act-grid"><button class="btn btn-ghost" onclick="modalSoCongTho('${id}')">📋 Sổ công của thợ</button>
+    <button class="btn btn-tape" onclick="modalChotSo('${id}')">🧾 Chốt sổ</button></div>`;
   const lsTU=traUngList(id);
   h+=`<div class="section-h">Lịch sử trả / ứng (${lsTU.length})</div><div class="card">`+(lsTU.length?lsTU.slice(0,8).map(x=>`<div class="slip"><div><div class="who" style="font-size:13.5px">${x.loai}</div><div class="meta">${new Date(x.ngay).toLocaleDateString('vi-VN')}</div></div><div class="big-num">${fmt(x.tien)}</div></div>`).join(''):`<div class="divider-note" style="padding:14px">Chưa có lần trả/ứng nào.</div>`)+`</div>`;
   h+=`<div class="section-h">Năng suất</div><div class="card"><div class="card-pad">
@@ -2658,6 +2869,7 @@ function hoanTacOp(key,lyDo){
     // gỡ dấu vết cấu trúc kèm theo
     g.bts.forEach(b=>{
       if(b.phienGioId)DB.phienGio=DB.phienGio.filter(x=>x.id!==b.phienGioId);
+      if(b.giaoCongId)DB.giaoCong=(DB.giaoCong||[]).filter(x=>x.id!==b.giaoCongId);
       if(b.restoreSlip)DB.giaoTP=DB.giaoTP.filter(x=>x.id!==b.restoreSlip);
       if(b.prevTT!==undefined&&b.restoreDonId){const d=getDon(b.restoreDonId);if(d)d.trangThai=b.prevTT;}
     });
@@ -2666,6 +2878,7 @@ function hoanTacOp(key,lyDo){
     // quá cửa sổ: chỉ cho đảo op tiền thuần
     if(!g.allMoney)return;
     beginOp();g.bts.forEach(bt=>{const dong=bt.dong.map(d=>Object.assign({},d,{chieu:d.chieu==='NO'?'CO':'NO'}));
+      if(bt.giaoCongId)DB.giaoCong=(DB.giaoCong||[]).filter(x=>x.id!==bt.giaoCongId);
       DB.butToan.push({id:uid(),suKien:'Sửa: '+bt.suKien,thoiDiem:now(),op:curOp(),dong,dao_cua:bt.id,lyDo});bt.daDao=true;});
   }
   Store.save();
@@ -2997,7 +3210,7 @@ function taiSaoLuu(){DB.settings.lastBackup=now();Store.save();
 function applyImport(obj){
   if(!obj||typeof obj!=='object'||!Array.isArray(obj.don)||!Array.isArray(obj.chuHang))throw new Error('không đúng định dạng Sổ Xưởng');
   DB=obj;if(!DB.settings)DB.settings={tyLeChung:0.15,view:'don'};
-  DB.phienGio=DB.phienGio||[];DB.phieuThao=DB.phieuThao||[];DB.giaoTP=DB.giaoTP||[];DB.phieuGiao=DB.phieuGiao||[];DB.butToan=DB.butToan||[];DB.schema=DB.schema||SCHEMA;DB.mauSan=DB.mauSan||[];
+  DB.phienGio=DB.phienGio||[];DB.phieuThao=DB.phieuThao||[];DB.giaoTP=DB.giaoTP||[];DB.phieuGiao=DB.phieuGiao||[];DB.butToan=DB.butToan||[];DB.schema=DB.schema||SCHEMA;DB.mauSan=DB.mauSan||[];DB.chotBao=DB.chotBao||[];DB.giaoCong=DB.giaoCong||[];
   Store.save();cur=(DB.settings&&DB.settings.view)||'tongquan';if(['home','thuchi','loinhuan'].includes(cur))cur='tongquan';if(!NAV.some(n=>n[0]===cur))cur='tongquan';render();
   toast('Đã hiển thị lại: '+DB.don.length+' đơn · '+DB.chuHang.length+' chủ hàng · '+DB.tho.length+' thợ · '+DB.butToan.length+' bút toán.');
 }
@@ -3036,15 +3249,20 @@ function modalThemTho(){openSheet('Thêm thợ',thoForm({ten:'',loai:'sp',donGia
 function modalSuaTho(id){openSheet('Sửa thợ',thoForm(getTho(id),id));}
 function thoForm(t,id){return `
   <div class="field"><label>Tên thợ</label><input id="th_ten" value="${t.ten||''}"></div>
-  <div class="field"><label>Cách tính công</label><select id="th_loai" onchange="el('th_giobox').style.display=this.value==='gio'?'block':'none'">
+  <div class="field"><label>Cách tính công (mặc định khi chốt sổ)</label><select id="th_loai" onchange="thoLoaiChange(this.value)">
     <option value="sp" ${t.loai==='sp'?'selected':''}>Tính theo sản phẩm</option>
-    <option value="gio" ${t.loai==='gio'?'selected':''}>Tính theo giờ</option></select></div>
+    <option value="bao" ${t.loai==='bao'?'selected':''}>Lương bao — trọn ngày</option>
+    <option value="gio" ${t.loai==='gio'?'selected':''}>Lương bao — theo giờ</option></select></div>
+  <div class="field" id="th_ngaybox" style="display:${t.loai==='bao'?'block':'none'}"><label>Đơn giá / ngày</label>
+    <input type="text" inputmode="numeric" class="sep" id="th_ngay" value="${sepStr(t.donGiaNgay||0)}"></div>
   <div class="field" id="th_giobox" style="display:${t.loai==='gio'?'block':'none'}"><label>Đơn giá / giờ</label>
     <input type="text" inputmode="numeric" class="sep" id="th_gio" value="${sepStr(t.donGiaGio||0)}"></div>
+  <div class="hint" style="margin-bottom:12px">Thợ bao vẫn nhận & làm công đoạn như thường. Lúc <b>chốt sổ</b> mới tính tiền theo bao; giá trị công đoạn chỉ để đối chiếu hiệu suất.</div>
   <button class="btn btn-primary" onclick="submitTho('${id||''}')">Lưu</button>`;}
+function thoLoaiChange(v){const n=el('th_ngaybox'),g=el('th_giobox');if(n)n.style.display=v==='bao'?'block':'none';if(g)g.style.display=v==='gio'?'block':'none';}
 function submitTho(id){const ten=el('th_ten').value.trim();if(!ten)return toast('Nhập tên.',true);
-  const loai=el('th_loai').value,donGiaGio=numVal('th_gio');
-  if(id)suaTho(id,{ten,loai,donGiaGio});else themTho({ten,loai,donGiaGio});closeSheet();render();toast('Đã lưu thợ.');}
+  const loai=el('th_loai').value,donGiaGio=numVal('th_gio'),donGiaNgay=numVal('th_ngay');
+  if(id)suaTho(id,{ten,loai,donGiaGio,donGiaNgay});else themTho({ten,loai,donGiaGio,donGiaNgay});closeSheet();render();toast('Đã lưu thợ.');}
 let cdEdit=[];let mauCtx={};
 function modalThemMau(chuId){cdEdit=[];mauCtx={chuId,id:'',sizeList:[],anh:'',tuKho:'',ten:'',gia:0,gio:0};drawMauForm();}
 function modalSuaMau(id){const m=getMau(id);const c=getMauChu(id);cdEdit=m.congDoan.map(x=>({...x}));
@@ -3376,7 +3594,7 @@ document.addEventListener('pointerdown',function(e){
 },true);
 function loadLocalOrSeed(){const saved=Store.load();window._cuMoi=false;
   if(saved&&saved.don&&saved.schema===SCHEMA){DB=saved;if(!DB.settings)DB.settings={tyLeChung:0.15,view:'don'};
-    DB.phienGio=DB.phienGio||[];DB.phieuThao=DB.phieuThao||[];DB.mauSan=DB.mauSan||[];cur=DB.settings.view||'don';}
+    DB.phienGio=DB.phienGio||[];DB.phieuThao=DB.phieuThao||[];DB.mauSan=DB.mauSan||[];DB.chotBao=DB.chotBao||[];DB.giaoCong=DB.giaoCong||[];cur=DB.settings.view||'don';}
   else{
     if(saved&&saved.don){try{localStorage.setItem('soxuong_v2_cu',JSON.stringify(saved));}catch(e){}window._cuMoi=true;}
     seedDemo();
