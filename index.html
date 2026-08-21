@@ -2338,7 +2338,9 @@ function modalGhiBoSung(){
   const opt=(v,txt,list)=>list?`<option value="${v}">${txt}</option>`:'';
   openSheet('Ghi bổ sung ngày trước',`
   <div class="hint" style="margin-top:0;margin-bottom:12px">Dùng khi có khoản của ngày trước chưa kịp nhập. Số sẽ vào đúng ngày bạn chọn trong sổ.</div>
-  <div class="field"><label>Ngày phát sinh</label><input type="date" id="gbs_ngay" value="${gbsToday()}" max="${gbsToday()}"></div>
+  <div class="field" id="gbs_ngayrow"><label>Ngày phát sinh</label><input type="date" id="gbs_ngay" value="${gbsToday()}" max="${gbsToday()}"></div>
+  <div class="field" id="gbs_laprow" style="display:none"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0"><input type="checkbox" id="gbs_lap" style="width:20px;height:20px" onchange="gbsToggle()"><span>Lặp cho nhiều ngày (cùng số tiền mỗi ngày)</span></label></div>
+  <div class="field" id="gbs_turow" style="display:none"><label>Từ ngày → đến ngày</label><div style="display:flex;gap:8px"><input type="date" id="gbs_tu" value="${gbsToday()}" max="${gbsToday()}" style="flex:1"><input type="date" id="gbs_den" value="${gbsToday()}" max="${gbsToday()}" style="flex:1"></div></div>
   <div class="field"><label>Loại khoản</label>
     <select id="gbs_loai" onchange="gbsToggle()">
       <optgroup label="💵 Tiền vào két">
@@ -2368,7 +2370,7 @@ function modalGhiBoSung(){
   <div class="field" id="gbs_donrow" style="display:none"><label>Đơn hàng</label>
     <select id="gbs_don"><option value="">— Chọn đơn —</option>${donOpts}</select></div>
   <div class="warn-box" id="gbs_lshint" style="display:none;margin-bottom:12px">Nhập lại việc cũ (đơn không có trong app): ghi thẳng công / doanh thu, không tạo đơn. Không dùng cho việc đang chạy trong app.</div>
-  <div class="field"><label>Số tiền</label><input type="text" inputmode="numeric" class="sep" id="gbs_sl" value="0" onfocus="this.select()"></div>
+  <div class="field"><label id="gbs_sllbl">Số tiền</label><input type="text" inputmode="numeric" class="sep" id="gbs_sl" value="0" onfocus="this.select()"></div>
   <div class="field" id="gbs_paidrow" style="display:none"><label style="display:flex;align-items:center;gap:9px;cursor:pointer"><input type="checkbox" id="gbs_paid" style="width:20px;height:20px"><span id="gbs_paidlbl">Đã trả tiền luôn</span></label></div>
   <div class="field" id="gbs_dgrow"><label>Ghi chú</label><input id="gbs_dg" placeholder="VD: Tiền điện tháng trước"></div>
   <button class="btn btn-primary" onclick="submitGhiBoSung()">Ghi vào sổ</button>`);
@@ -2389,11 +2391,20 @@ function gbsToggle(){
   show('gbs_paidrow',ls);
   const lbl=el('gbs_paidlbl');if(lbl)lbl.textContent=(loai==='congls')?'Đã trả lương cho thợ luôn':'Chủ hàng đã trả tiền luôn';
   const pd=el('gbs_paid');if(pd&&!ls)pd.checked=false;
+  const canLap=(loai==='chi'||loai==='tra'||loai==='ung'||loai==='congls'||loai==='psth');
+  show('gbs_laprow',canLap);
+  const lapCb=el('gbs_lap');if(lapCb&&!canLap)lapCb.checked=false;
+  const lap=canLap&&lapCb&&lapCb.checked;
+  show('gbs_ngayrow',!lap);
+  show('gbs_turow',lap);
+  const sllbl=el('gbs_sllbl');if(sllbl)sllbl.textContent=lap?'Số tiền mỗi ngày':'Số tiền';
 }
 function submitGhiBoSung(){try{
   const loai=(el('gbs_loai')||{}).value||'chi';
   const s=numVal('gbs_sl');
   if(s<=0)return toast('Nhập số tiền.',true);
+  if((loai==='chi'||loai==='tra'||loai==='ung'||loai==='congls'||loai==='psth')&&el('gbs_lap')&&el('gbs_lap').checked)
+    return submitGhiBoSungLap(loai,s);
   const dstr=(el('gbs_ngay')||{}).value||'';
   if(!dstr)return toast('Chọn ngày phát sinh.',true);
   const p=dstr.split('-').map(Number),y=p[0],mo=p[1],dd=p[2];
@@ -2425,6 +2436,42 @@ function submitGhiBoSung(){try{
   const dk=dayKey(ts),nd=new Date(),sameMonth=(y===nd.getFullYear()&&(mo-1)===nd.getMonth());
   _csFilter=sameMonth?'thang':'all';_csDayOpen[dk]=true;
   closeSheet();render();toastUndo(msg+' ('+dd+'/'+mo+')');
+}catch(e){toast(e.message,true)}}
+
+/* Danh sách ngày (bao gồm 2 đầu) giữa tu..den, mỗi phần tử 'YYYY-MM-DD' */
+function gbsDays(tu,den){const out=[];const a=tu.split('-').map(Number),b=den.split('-').map(Number);
+  let d=new Date(a[0],a[1]-1,a[2]);const e=new Date(b[0],b[1]-1,b[2]);const p=n=>String(n).padStart(2,'0');
+  while(d<=e){out.push(d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()));d.setDate(d.getDate()+1);if(out.length>400)break;}
+  return out;}
+/* Ghi cùng một khoản cho nhiều ngày liên tiếp (lương bao / chi phí cố định…) */
+function submitGhiBoSungLap(loai,s){try{
+  let tu=(el('gbs_tu')||{}).value||'',den=(el('gbs_den')||{}).value||'';
+  if(!tu||!den)return toast('Chọn từ ngày và đến ngày.',true);
+  if(tu>den){const t=tu;tu=den;den=t;}
+  if(kmTs(den)>now())return toast('Không ghi cho ngày chưa tới.',true);
+  let thoId='',kind='com';
+  if(loai==='congls'||loai==='psth'||loai==='tra'||loai==='ung'){thoId=(el('gbs_tho')||{}).value||'';if(!thoId)return toast('Chọn thợ.',true);}
+  if(loai==='psth')kind=(el('gbs_pskind')||{}).value||'com';
+  const dg=(el('gbs_dg')&&el('gbs_dg').value)?el('gbs_dg').value.trim():'';
+  const paid=(loai==='congls'&&el('gbs_paid')&&el('gbs_paid').checked);
+  const days=gbsDays(tu,den);
+  if(DB.settings.kyKhoa&&DB.settings.kyKhoaTime&&days.some(ds=>kmTs(ds)<=DB.settings.kyKhoaTime))
+    return toast('Khoảng ngày chạm kỳ đã khóa — không ghi được.',true);
+  let n=0;
+  days.forEach(ds=>{const ts=kmTs(ds);if(ts>now())return;
+    if(loai==='chi')chiPhiXuong({soTien:s,dienGiai:dg||'chi phí xưởng',ngay:ts});
+    else if(loai==='tra')traLuong({thoId,soTien:s,ngay:ts});
+    else if(loai==='ung')ungLuong({thoId,soTien:s,ngay:ts});
+    else if(loai==='psth')phatSinhTho({thoId,soTien:s,kind,dienGiai:dg,ngay:ts});
+    else if(loai==='congls'){congThoLichSu({thoId,soTien:s,ngay:ts});if(paid)traLuong({thoId,soTien:s,ngay:ts});}
+    _csDayOpen[ds]=true;n++;});
+  if(!n)return toast('Không có ngày hợp lệ.',true);
+  const nd=new Date();
+  const allSameMonth=days.every(ds=>{const q=ds.split('-').map(Number);return q[0]===nd.getFullYear()&&(q[1]-1)===nd.getMonth();});
+  _csFilter=allSameMonth?'thang':'all';
+  const a=tu.split('-').map(Number),b=den.split('-').map(Number);
+  closeSheet();render();
+  toast('Đã ghi '+n+' ngày ('+a[2]+'/'+a[1]+'–'+b[2]+'/'+b[1]+'). Xóa từng ngày ở Chốt sổ nếu cần.');
 }catch(e){toast(e.message,true)}}
 
 /* ============ KẾ MỤC THỢ — máy tính công theo ngày (chức năng TẠM, lưu riêng theo máy) ============
