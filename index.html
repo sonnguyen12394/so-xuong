@@ -822,6 +822,33 @@ function chiKhac({soTien,dienGiai,ngay}){beginOp();
   ghi('Chi khác: '+(dienGiai||'ship/đền'),[
     {tk:TK.RO_CHUNG,chieu:'NO',soTien},{tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
+/* ===========================================================
+   SỔ RIÊNG CỦA TÔI — thu/chi cá nhân của chủ.
+   TÁCH BIỆT HOÀN TOÀN với sổ xưởng: KHÔNG gọi ghi()/beginOp(),
+   KHÔNG tạo bút toán, KHÔNG đụng Quỹ/két, Lãi tạm, Chốt sổ, cầu nối.
+   Chỉ đọc/ghi mảng riêng DB.soRieng rồi Store.save(). Sửa/xóa tự do.
+   =========================================================== */
+function srList(){DB.soRieng=DB.soRieng||[];return DB.soRieng;}
+function srListTho(thoId){return srList().filter(r=>r.thoId===thoId);}
+/* Doanh thu của thợ từ XƯỞNG = tổng tiền công xưởng chốt/nợ cho thợ (đã kiếm được).
+   = tổng bên Có của Nợ lương thợ (gồm nhận về cho thợ SP + chốt sổ thợ bao/giờ).
+   Chỉ đọc từ sổ cái, KHÔNG tạo bút toán. Chủ xưởng không tự trả mình nên = 0. */
+function luongXuongTho(thoId){const t=getTho(thoId);if(!t||t.isOwner)return 0;return bal(TK.PHAI_TRA_THO,d=>d.thoId===thoId).co;}
+function soRiengThem({thoId,loai,soTien,dienGiai,ngay}){
+  const s=Math.round(+soTien||0); if(s<=0)throw new Error('Nhập số tiền.');
+  if(loai!=='thu'&&loai!=='chi')throw new Error('Chọn tiền vào hay tiền ra.');
+  srList().push({id:uid(),thoId:thoId||null,thoiDiem:ngay||now(),loai,soTien:s,dienGiai:(dienGiai||'').trim()});
+  Store.save();
+}
+function soRiengSua({id,loai,soTien,dienGiai,ngay}){
+  const r=srList().find(x=>x.id===id); if(!r)return;
+  const s=Math.round(+soTien||0); if(s<=0)throw new Error('Nhập số tiền.');
+  if(loai==='thu'||loai==='chi')r.loai=loai;
+  r.soTien=s; r.dienGiai=(dienGiai||'').trim(); if(ngay)r.thoiDiem=ngay;
+  Store.save();
+}
+function soRiengXoa(id){DB.soRieng=srList().filter(x=>x.id!==id);Store.save();}
+function srTong(list){let thu=0,chi=0;(list||srList()).forEach(r=>{if(r.loai==='thu')thu+=r.soTien;else chi+=r.soTien;});return {thu,chi,con:thu-chi};}
 /* ---- Tiền phát sinh cho thợ (cơm / hỗ trợ / khác) ----
    Là chi phí gián tiếp: Nợ Rổ chung (gắn mã thợ + loại) / Có Quỹ.
    Tự ngấm vào giá vốn các đơn theo tiền công như "Chi tiền xưởng",
@@ -3372,7 +3399,8 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
     <div class="card"><div class="card-pad">
       <div class="kv"><div class="k">Số cái tự làm</div><div class="v">${ns.tongCai} cái</div></div>
       <div class="kv"><div class="k">Giá trị công (đã tính vào lãi)</div><div class="v">${fmt(ns.tongCong)}</div></div></div></div>
-    <div class="hint" style="text-align:center">Công của bạn được tính vào giá vốn nên lãi là lãi thật. Không phải trả tiền ra.</div>`);return;}
+    <div class="hint" style="text-align:center">Công của bạn được tính vào giá vốn nên lãi là lãi thật. Không phải trả tiền ra.</div>`
+    +srSectionHtml(id));return;}
   const no=luongNoTho(id);const daTra=bal(TK.PHAI_TRA_THO,d=>d.thoId===id).no;
   let h=`<div class="card"><div class="card-pad">
     <div class="kv"><div class="k">Xưởng còn nợ lương</div><div class="v big-num ${no>0?'money-neg':no<0?'money-pos':''}">${fmt(no)}</div></div>
@@ -3408,6 +3436,7 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
     <div class="kv"><div class="k">Tổng tiền công</div><div class="v">${fmt(ns.tongCong)}</div></div>
     <div class="kv"><div class="k">Hàng phế</div><div class="v ${ns.tongPhe>0?'money-neg':''}">${ns.tongPhe} cái</div></div></div></div>`;
   h+=`<div class="hint" style="text-align:center;margin:4px 0 12px">Lương tự cộng từ số hàng thợ trả về — không cộng tay.</div>`;
+  h+=srSectionHtml(id);
   h+=`<button class="btn btn-ghost" onclick="modalSuaTho('${id}')">✎ Sửa thông tin thợ</button>`;
   h+=`<div style="height:8px"></div><button class="btn btn-danger btn-sm" style="width:100%" onclick="confirmXoaTho('${id}')">🗑 Xóa thợ này</button>`;
   openSheet(t.ten,h);
@@ -3829,6 +3858,71 @@ let tqTab='home';
 let xhMode='thang'; /* biểu đồ: 'thang' | 'ngay' */
 const TQ_MAIN=[['home','Hôm nay'],['laitien','Lãi & Tiền'],['them','Thêm']];
 const TQ_HIDDEN={nhatky:'Nhật ký nhập',thuchi:'Thu / Chi & dòng tiền',xuhuong:'Biểu đồ',khoaky:'Khóa kỳ'};
+/* ===========================================================
+   SỔ THU CHI RIÊNG — gắn theo TỪNG THỢ (mọi loại thợ, kể cả chủ).
+   Tách biệt với sổ xưởng: KHÔNG bút toán, KHÔNG đụng két/Lãi tạm/Chốt sổ.
+   =========================================================== */
+let _srId=null,_srLoai='chi',_srTho=null;
+function srSectionHtml(thoId){
+  const list=srListTho(thoId).slice().sort((a,b)=>b.thoiDiem-a.thoiDiem);
+  const m=srTong(list);                       // thu/chi NGOÀI (tự nhập)
+  const luongX=luongXuongTho(thoId);          // doanh thu từ xưởng (tự tính)
+  const thu=luongX+m.thu, chi=m.chi, con=thu-chi;
+  let h=`<div class="section-h">Sổ thu chi riêng <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--ink-3)">· không tính vào xưởng</span></div>`;
+  h+=`<div class="card" style="border:1.5px solid var(--sage)"><div class="card-pad">
+    <div class="kv"><div class="k">Còn lại</div><div class="v big-num ${con>=0?'money-pos':'money-neg'}">${con>=0?'':'−'}${fmt(Math.abs(con)).replace('−','')}</div></div>
+    <div class="kv"><div class="k">Tiền vào (thu)</div><div class="v money-pos">${fmt(thu)}</div></div>
+    <div class="kv"><div class="k">Tiền ra (chi)</div><div class="v money-neg">${fmt(chi)}</div></div></div>`;
+  if(luongX>0)h+=`<div class="slip" style="opacity:.9">
+      <div style="display:flex;gap:11px;align-items:flex-start"><div style="font-size:16px;line-height:1.2">🧵</div>
+      <div><div class="who" style="font-size:13.5px">Doanh thu từ xưởng (lương)</div><div class="meta">Tự tính từ chốt sổ · sửa ở phần lương của xưởng</div></div></div>
+      <div class="big-num money-pos" style="font-size:14px">+${fmt(luongX).replace('−','')}</div></div>`;
+  h+=`<div class="act-grid" style="margin:0 10px 10px">
+      <button class="btn btn-sage btn-sm" onclick="_srLoai='thu';modalSoRieng('${thoId}',null)">📥 Thu ngoài</button>
+      <button class="btn btn-primary btn-sm" onclick="_srLoai='chi';modalSoRieng('${thoId}',null)">📤 Chi ngoài</button></div>`
+  +(list.length?list.slice(0,10).map(r=>`<div class="slip" onclick="_srLoai='${r.loai}';modalSoRieng('${thoId}','${r.id}')">
+      <div style="display:flex;gap:11px;align-items:flex-start"><div style="font-size:16px;line-height:1.2">${r.loai==='thu'?'📥':'📤'}</div>
+      <div><div class="who" style="font-size:13.5px">${escHtml(r.dienGiai||(r.loai==='thu'?'Thu ngoài':'Chi ngoài'))}</div>
+      <div class="meta">${new Date(r.thoiDiem).toLocaleDateString('vi-VN')} · tự nhập · sửa được</div></div></div>
+      <div style="text-align:right;white-space:nowrap"><div class="big-num ${r.loai==='thu'?'money-pos':'money-neg'}" style="font-size:14px">${r.loai==='thu'?'+':'−'}${fmt(r.soTien).replace('−','')}</div><span style="color:var(--ink-3)">›</span></div></div>`).join('')
+    :`<div class="divider-note" style="padding:14px">Chưa có khoản tự nhập nào.</div>`)
+  +`</div>`;
+  return h;
+}
+function srSetLoai(l){_srLoai=l;modalSoRieng(_srTho,_srId);}
+function modalSoRieng(thoId,id){
+  _srTho=thoId||null; _srId=id||null;
+  const t=getTho(thoId);
+  const r=id?srList().find(x=>x.id===id):null;
+  const tien=r?r.soTien:''; const dg=r?(r.dienGiai||''):'';
+  const ngay=r?new Date(r.thoiDiem):new Date();
+  const p=n=>String(n).padStart(2,'0');
+  const ngayStr=ngay.getFullYear()+'-'+p(ngay.getMonth()+1)+'-'+p(ngay.getDate());
+  const maxNgay=ngayStr>kmToday()?ngayStr:kmToday();
+  const title=(r?'Sửa · ':'')+(_srLoai==='thu'?'Thu ngoài':'Chi ngoài')+(t?' — '+t.ten:'');
+  openSheet(title,`
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button class="btn ${_srLoai==='thu'?'btn-sage':'btn-ghost'} btn-sm" style="flex:1" onclick="srSetLoai('thu')">📥 Thu ngoài</button>
+      <button class="btn ${_srLoai==='chi'?'btn-primary':'btn-ghost'} btn-sm" style="flex:1" onclick="srSetLoai('chi')">📤 Chi ngoài</button>
+    </div>
+    <div class="field"><label>Số tiền</label><input type="text" inputmode="numeric" class="sep" id="sr_tien" value="${tien}" placeholder="0" onfocus="this.select()" style="font-size:17px"></div>
+    <div class="field"><label>Ghi gì</label><input id="sr_dg" value="${escHtml(dg)}" placeholder="${_srLoai==='thu'?'VD: bán đồ, ai đó trả nợ…':'VD: cà phê, mua đồ, tiền chợ…'}"></div>
+    <div class="field"><label>Ngày</label><input type="date" id="sr_ngay" value="${ngayStr}" max="${maxNgay}"></div>
+    <div class="hint" style="margin-bottom:12px">Khoản thu/chi <b>ngoài</b> của riêng người này — KHÔNG đụng tới tiền trong két, Lãi tạm hay Chốt sổ của xưởng. Lương xưởng đã tự cộng vào phần “Doanh thu từ xưởng”, không cần nhập lại ở đây.</div>
+    <button class="btn btn-primary" style="width:100%" onclick="submitSoRieng()">${r?'Lưu thay đổi':'Ghi vào sổ riêng'}</button>
+    ${r?`<button class="btn btn-danger btn-sm" style="width:100%;margin-top:8px" onclick="xoaSoRieng('${r.id}')">🗑 Xóa khoản này</button>`:''}
+  `);
+}
+function submitSoRieng(){try{
+  const s=numVal('sr_tien'); if(s<=0)return toast('Nhập số tiền.',true);
+  const dg=(el('sr_dg')&&el('sr_dg').value||'').trim();
+  const nv=el('sr_ngay')&&el('sr_ngay').value; const ts=nv?new Date(nv+'T12:00:00').getTime():now();
+  if(_srId)soRiengSua({id:_srId,loai:_srLoai,soTien:s,dienGiai:dg,ngay:ts});
+  else soRiengThem({thoId:_srTho,loai:_srLoai,soTien:s,dienGiai:dg,ngay:ts});
+  closeSheet();toast(_srId?'Đã lưu.':(_srLoai==='thu'?'Đã ghi tiền vào sổ riêng.':'Đã ghi tiền ra sổ riêng.'));
+}catch(e){toast(e.message,true);}}
+function xoaSoRieng(id){xacNhan('Xóa khoản này khỏi sổ riêng?',()=>{soRiengXoa(id);closeSheet();toast('Đã xóa.');},{ok:'Xóa',nguyHiem:true,title:'Xóa khoản'});}
+
 function viewTongQuan(m){
   if(!TQ_MAIN.some(s=>s[0]===tqTab)&&!(tqTab in TQ_HIDDEN))tqTab='home';
   const hidden=(tqTab in TQ_HIDDEN);
@@ -4455,7 +4549,7 @@ function navBack(){
   _nav=[];_hardClose();
 }
 function _hardClose(){el('scrim').classList.remove('on');_nvBackTo=null;_sheetClose=null;}
-const _NAV_FRAMES=['modalDon','modalTaoDon','modalGiaoViec','modalNhanVe','modalChamGio','modalChiPhiDon','modalGiaoXe','modalTienDen','modalXinCham','modalChamVe','modalThao','modalGiaoTP','modalChuHang','modalThuTien','modalNoXau','modalChiPhi','modalRutVon','modalBoVon','modalGhiBoSung','modalSoCong','modalChotLuong','modalSoCongTho','modalChotSo','modalThoChiTiet','modalTraLuong','modalUng','modalPhatSinhTho','modalSuaPhatSinh','modalSuaDonLS','modalSuaDon','modalOp','modalChonChuThu','modalCaiDat','modalPhucHoi','modalThemChu','modalSuaChu','modalThemTho','modalSuaTho','modalThemMau','modalSuaMau','modalKhoMau','modalThemMauSan','modalSuaMauSan','modalDKMauSan','modalNeoMauSan','modalDauKy','moNhanNhanh','doDongDon','confirmDongDon','confirmHuyDon','confirmTraLai','confirmTraHet','confirmXoaDon','confirmXoaHanDon','kmChot','mcOpen','exportModal','hoiLanTruyen','moKetNoiDamMay','openSoKeToan','askDao','ltDetail'];
+const _NAV_FRAMES=['modalDon','modalTaoDon','modalGiaoViec','modalNhanVe','modalChamGio','modalChiPhiDon','modalGiaoXe','modalTienDen','modalXinCham','modalChamVe','modalThao','modalGiaoTP','modalChuHang','modalThuTien','modalNoXau','modalChiPhi','modalRutVon','modalBoVon','modalGhiBoSung','modalSoCong','modalChotLuong','modalSoCongTho','modalChotSo','modalThoChiTiet','modalTraLuong','modalUng','modalPhatSinhTho','modalSuaPhatSinh','modalSuaDonLS','modalSuaDon','modalOp','modalChonChuThu','modalCaiDat','modalPhucHoi','modalThemChu','modalSuaChu','modalThemTho','modalSuaTho','modalThemMau','modalSuaMau','modalKhoMau','modalThemMauSan','modalSuaMauSan','modalDKMauSan','modalNeoMauSan','modalDauKy','moNhanNhanh','doDongDon','confirmDongDon','confirmHuyDon','confirmTraLai','confirmTraHet','confirmXoaDon','confirmXoaHanDon','kmChot','mcOpen','exportModal','hoiLanTruyen','moKetNoiDamMay','openSoKeToan','askDao','ltDetail','modalSoRieng'];
 function _installNavFrames(){_NAV_FRAMES.forEach(name=>{const orig=window[name];
   if(typeof orig!=='function'||orig._wrapped)return;
   const w=function(){const a=Array.prototype.slice.call(arguments);_frame(name,a);return orig.apply(this,a);};
@@ -4485,13 +4579,9 @@ el('scrim2').addEventListener('click',e=>{if(e.target===el('scrim2'))closeConfir
 document.addEventListener('input',e=>{const t=e.target;if(t&&t.classList&&t.classList.contains('sep')){const raw=(''+t.value).replace(/[^\d]/g,'');t.value=raw?(+raw).toLocaleString('vi-VN'):'';}});
 let toastT;function toast(msg,err){const t=el('toast');t.style.display='block';t.textContent=msg;t.className='toast on'+(err?' err':'');clearTimeout(toastT);toastT=setTimeout(()=>t.className='toast',err?2600:1800);}
 /* toast kèm nút Hoàn tác — hiện sau khi nhập, cho sửa ngay */
-function toastUndo(msg){
-  const g=opGroups()[0]; // phát sinh mới nhất = cái vừa nhập
-  if(!g||!g.undoNow){toast(msg);return;}
-  const t=el('toast');t.style.display='flex';t.style.alignItems='center';t.style.justifyContent='center';t.style.gap='6px';
-  t.innerHTML=`<span>${msg}</span><button onclick="undoTuToast('${g.key}')" style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.4);color:#fff;font-weight:700;padding:6px 12px;border-radius:9px;font-size:13px;white-space:nowrap">↩ Hoàn tác</button>`;
-  t.className='toast on';clearTimeout(toastT);toastT=setTimeout(()=>{t.className='toast';},6000);
-}
+/* Bỏ nút "Hoàn tác" hiện sau khi nhập — chỉ báo đã ghi, không kèm nút.
+   Khoản đã ghi vẫn sửa/xóa được ở Chốt sổ hoặc Nhật ký nếu cần. */
+function toastUndo(msg){ toast(msg); }
 function undoTuToast(key){hoanTacOp(key,'');el('toast').className='toast';if(el('scrim').classList.contains('on'))closeSheet();render();toast('Đã hoàn tác.');}
 
 /* ---------- Khởi động ---------- */
