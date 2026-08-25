@@ -1386,7 +1386,7 @@ function seedDemo(){
    GIAO DIỆN
    =========================================================== */
 let cur='don';
-const NAV=[['tongquan','📊','Tổng quan'],['don','📋','Đơn'],['chuhang','🧑','Chủ hàng'],['tho','👥','Thợ'],['kemuc','🧮','Tính sổ'],['chotso','📒','Chốt sổ'],['laitam','💰','Lãi tạm']];
+const NAV=[['tongquan','📊','Tổng quan'],['don','📋','Đơn'],['chuhang','🧑','Chủ hàng'],['tho','👥','Thợ'],['kemuc','🧮','Tính sổ'],['laitam','💰','Lãi tạm']];
 function renderNav(){const nv=el('nav');nv.style.gridTemplateColumns='repeat('+NAV.length+',1fr)';
   nv.innerHTML=NAV.map(([k,ic,t])=>
   `<button class="${cur===k?'on':''}" onclick="go('${k}')"><span class="ic">${ic}</span>${t}</button>`).join('')}
@@ -1396,7 +1396,7 @@ function render(){
   el('hCash').textContent=fmt(bal(TK.QUY).net);renderNav();renderHdrUndo();
   const m=el('main');el('fab').innerHTML='';
   if(cur==='tongquan')viewTongQuan(m);else if(cur==='don')viewDon(m);else if(cur==='chuhang')viewChuHang(m);
-  else if(cur==='kemuc')viewKeMuc(m);else if(cur==='chotso')viewChotSo(m);else if(cur==='laitam')viewLaiTam(m);else viewTho(m);
+  else if(cur==='kemuc')viewKeMuc(m);else if(cur==='laitam')viewLaiTam(m);else viewTho(m);
 }
 
 /* ===========================================================
@@ -1452,6 +1452,68 @@ function svgChart(labels,groups,opts){opts=opts||{};
 function chartLegend(items){return `<div style="display:flex;gap:16px;justify-content:center;margin-top:8px;flex-wrap:wrap">`+
   items.map(it=>`<span style="font-size:11.5px;color:var(--ink-2);display:inline-flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:3px;background:${it.color};display:inline-block"></span>${it.name}</span>`).join('')+`</div>`;}
 
+/* ---- biểu đồ ĐƯỜNG (xu hướng) ----
+   series: mảng số (1 đường chính, tô vùng, dương xanh / âm đỏ so với mốc 0).
+   opts.overlay: {vals:[...],color,name} vẽ thêm 1 đường (vd số dư lũy kế), không tô vùng.
+   opts.showVal: ghi số ở điểm cuối mỗi đường. opts.posColor/negColor: màu vùng. */
+function svgLine(labels,series,opts){opts=opts||{};
+  const W=340,H=opts.h||150,padT=16,padB=20,padX=10;
+  const ov=opts.overlay&&opts.overlay.vals&&opts.overlay.vals.length?opts.overlay:null;
+  const all=series.concat(ov?ov.vals:[]);
+  let maxV=0,minV=0;all.forEach(v=>{if(v>maxV)maxV=v;if(v<minV)minV=v;});
+  if(maxV<=0&&minV>=0)maxV=1;const range=(maxV-minV)||1;
+  const n=series.length||1;const plotW=W-padX*2,plotH=H-padT-padB;
+  const zeroY=padT+(maxV/range)*plotH;
+  const X=i=>padX+(n<=1?plotW/2:i*plotW/(n-1));
+  const Y=v=>padT+((maxV-v)/range)*plotH;
+  const posC=opts.posColor||'#2F7A63',negC=opts.negColor||'#C0392B';
+  const uq='cl'+Math.random().toString(36).slice(2,8);const idP='clipPos'+uq,idN='clipNeg'+uq;
+  let out=`<line x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${(W-padX)}" y2="${zeroY.toFixed(1)}" stroke="#E7E2D6" stroke-width="1"/>`;
+  // vùng tô: cắt ở mốc 0 để phần dương xanh, phần âm đỏ
+  const pts=series.map((v,i)=>[X(i),Y(v),v]);
+  out+=`<defs><clipPath id="${idP}"><rect x="0" y="0" width="${W}" height="${zeroY.toFixed(1)}"/></clipPath>`+
+       `<clipPath id="${idN}"><rect x="0" y="${zeroY.toFixed(1)}" width="${W}" height="${(H-zeroY).toFixed(1)}"/></clipPath></defs>`;
+  const polyArea=`<polygon points="${padX.toFixed(1)},${zeroY.toFixed(1)} ${pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')} ${(W-padX).toFixed(1)},${zeroY.toFixed(1)}"`;
+  out+=`${polyArea} fill="${posC}" opacity="0.13" clip-path="url(#${idP})"/>`;
+  out+=`${polyArea} fill="${negC}" opacity="0.13" clip-path="url(#${idN})"/>`;
+  // đường chính (2 lớp: xanh phần trên 0, đỏ phần dưới 0)
+  const line=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  out+=`<path d="${line}" fill="none" stroke="${posC}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" clip-path="url(#${idP})"/>`;
+  out+=`<path d="${line}" fill="none" stroke="${negC}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" clip-path="url(#${idN})"/>`;
+  // chấm điểm cuối
+  const last=pts[pts.length-1];if(last){out+=`<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="${last[2]>=0?posC:negC}"/>`;
+    if(opts.showVal)out+=`<text x="${Math.min(last[0],W-padX-2).toFixed(1)}" y="${(last[1]-7).toFixed(1)}" font-size="9" text-anchor="end" fill="#5B6676" font-weight="700">${fmtShort(last[2])}</text>`;}
+  // overlay
+  if(ov){const op=ov.vals.map((v,i)=>[X(i),Y(v)]);
+    const ol=op.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+    out+=`<path d="${ol}" fill="none" stroke="${ov.color||'#B8862F'}" stroke-width="2" stroke-dasharray="4 3" stroke-linejoin="round"/>`;
+    const lo=op[op.length-1];if(lo){out+=`<circle cx="${lo[0].toFixed(1)}" cy="${lo[1].toFixed(1)}" r="3" fill="${ov.color||'#B8862F'}"/>`;}}
+  // nhãn trục X (thưa cho đỡ chật)
+  const step=Math.ceil(n/6);
+  labels.forEach((lb,i)=>{if(lb==='')return;if(i%step!==0&&i!==n-1)return;
+    out+=`<text x="${X(i).toFixed(1)}" y="${H-6}" font-size="10" text-anchor="middle" fill="#8A94A3">${lb}</text>`;});
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">${out}</svg>`;}
+
+/* ---- biểu đồ TRÒN (donut) cho cơ cấu phần-trên-tổng ----
+   parts:[{v,color,name}] (v ≥ 0). center: nhãn giữa (vd tổng). Trả '' nếu tổng=0. */
+function svgDonut(parts,opts){opts=opts||{};parts=parts.filter(p=>p.v>0);
+  const tot=parts.reduce((s,p)=>s+p.v,0);if(tot<=0)return '';
+  const S=132,cx=S/2,cy=S/2,r=52,rin=32;let a0=-Math.PI/2,out='';
+  const pol=(r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];
+  parts.forEach(p=>{const a1=a0+p.v/tot*2*Math.PI;const big=(a1-a0)>Math.PI?1:0;
+    const[x0,y0]=pol(r,a0),[x1,y1]=pol(r,a1),[x2,y2]=pol(rin,a1),[x3,y3]=pol(rin,a0);
+    out+=`<path d="M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${big} 1 ${x1.toFixed(1)} ${y1.toFixed(1)} L${x2.toFixed(1)} ${y2.toFixed(1)} A${rin} ${rin} 0 ${big} 0 ${x3.toFixed(1)} ${y3.toFixed(1)} Z" fill="${p.color}"/>`;
+    a0=a1;});
+  const cLbl=opts.center!=null?`<text x="${cx}" y="${cy-2}" font-size="10" text-anchor="middle" fill="#8A94A3">${opts.centerTop||'Tổng'}</text><text x="${cx}" y="${cy+13}" font-size="13" text-anchor="middle" font-weight="800" fill="#3A4453">${opts.center}</text>`:'';
+  const svg=`<svg viewBox="0 0 ${S} ${S}" width="128" height="128" style="display:block;flex:0 0 auto">${out}${cLbl}</svg>`;
+  const legend=`<div style="display:flex;flex-direction:column;gap:7px;flex:1;min-width:0">`+
+    parts.map(p=>`<div style="display:flex;align-items:center;gap:7px;font-size:12px">
+      <span style="width:11px;height:11px;border-radius:3px;background:${p.color};flex:0 0 auto"></span>
+      <span style="color:var(--ink-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
+      <b style="color:var(--ink-1)">${fmtShort(p.v)}</b>
+      <span style="color:var(--ink-3);width:34px;text-align:right">${Math.round(p.v/tot*100)}%</span></div>`).join('')+`</div>`;
+  return `<div style="display:flex;align-items:center;gap:14px">${svg}${legend}</div>`;}
+
 /* ===========================================================
    KỲ THỜI GIAN DÙNG CHUNG — 1 kiểu duy nhất cho mọi màn:
    Ngày · Tuần · Tháng · Tất cả  + nút ‹ › lùi/tới kỳ.
@@ -1498,7 +1560,7 @@ function miniThuChi(from,to,events,opts){opts=opts||{};
   events.forEach(e=>{const k=keyFn(e.t);if(!(k in thu))return;thu[k]+=e.thu||0;chi[k]+=e.chi||0;});
   const aThu=keys.map(k=>thu[k]),aChi=keys.map(k=>chi[k]);
   if(sum(aThu)===0&&sum(aChi)===0)return `<div class="card"><div class="card-pad"><div class="hint" style="text-align:center;padding:16px 0;margin:0">📊 Kỳ này chưa có thu/chi để vẽ biểu đồ.</div></div></div>`;
-  const groups=labels.map((_,i)=>[{v:aThu[i],color:'#2F7A63'},{v:aChi[i],color:'#C0392B'}]);
+  const groups=labels.map((_,i)=>[{v:Math.abs(aThu[i]),color:'#2F7A63'},{v:Math.abs(aChi[i]),color:'#C0392B'}]);
   return `<div class="card"><div class="card-pad">${svgChart(labels,groups,{h:150})}${chartLegend([{name:opts.thuLbl||'Tiền vào',color:'#2F7A63'},{name:opts.chiLbl||'Tiền ra',color:'#C0392B'}])}</div></div>`;}
 /* lương xưởng ĐÃ TRẢ cho thợ trong [from,to] — bản có mốc, cho Sổ riêng phân kỳ */
 function luongXuongThoRange(thoId,from,to){const t=getTho(thoId);if(!t||t.isOwner)return 0;let s=0;
@@ -2819,7 +2881,7 @@ function modalBoVon(){openSheet('Bỏ thêm tiền vào xưởng',`
 function submitBoVon(){try{const s=numVal('bv_sl');if(s<=0)return toast('Nhập số tiền.',true);
   boVon({soTien:s,dienGiai:el('bv_dg').value.trim()});closeSheet();render();toastUndo('Đã ghi bỏ thêm tiền vào xưởng.');}catch(e){toast(e.message,true)}}
 
-/* ---------- Ghi bổ sung cho ngày trước (tab Chốt sổ) ---------- */
+/* ---------- Ghi bổ sung cho ngày trước (Tổng quan → Chốt sổ) ---------- */
 function gbsToday(){const d=new Date();const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
 function modalGhiBoSung(){
   const chuOpts=DB.chuHang.map(c=>`<option value="${c.id}">${c.ten}</option>`).join('');
@@ -3051,7 +3113,7 @@ function kmBodyHtml(){let h='';
         <div style="font-size:13px;margin-bottom:6px">🧵 <b>${who||'—'}</b> · ngày ${nd[2]}/${nd[1]}/${nd[0]}</div>
         ${rows}
         <div class="kv" style="margin-top:6px;border-top:1px dashed var(--line-2);padding-top:6px"><div class="k">Công đã vào sổ</div><div class="v big-num" id="km_day_${d}">${kmF(day.luuTien)}</div></div>
-        <div class="hint" style="margin-top:6px">Đã ghi vào sổ thật. Muốn sửa/xóa thì vào tab <b>Chốt sổ</b> (hoặc bấm Hoàn tác ngay sau khi lưu).</div>
+        <div class="hint" style="margin-top:6px">Đã ghi vào sổ thật. Muốn sửa/xóa thì vào <b>Tổng quan → Chốt sổ</b> (hoặc bấm Hoàn tác ngay sau khi lưu).</div>
       </div></div>`;
       return;
     }
@@ -3123,7 +3185,7 @@ function kmLuuCong(d){kmSync();
   if(ts>now())return toast('Không lưu cho ngày chưa tới.',true);
   if(DB.settings.kyKhoa&&DB.settings.kyKhoaTime&&ts<=DB.settings.kyKhoaTime)return toast('Ngày này đã khóa sổ — không lưu được.',true);
   const ten=(getTho(thoId)||{}).ten||'thợ';
-  xacNhan('Lưu công của '+ten+' — ngày '+p[2]+'/'+p[1]+':\n'+kmF(tong)+' đ\n\nSố này vào sổ thật (tab Chốt sổ), sửa/xóa được tới khi khóa kỳ.',()=>{
+  xacNhan('Lưu công của '+ten+' — ngày '+p[2]+'/'+p[1]+':\n'+kmF(tong)+' đ\n\nSố này vào sổ thật (Tổng quan → Chốt sổ), sửa/xóa được tới khi khóa kỳ.',()=>{
     try{congThoLichSu({thoId,soTien:tong,ngay:ts});
       day.daLuu=true;day.luuTien=tong;kmSave();
       const dk=dayKey(ts),nd=new Date(),sm=(p[0]===nd.getFullYear()&&(p[1]-1)===nd.getMonth());
@@ -3475,6 +3537,18 @@ function viewLaiTam(m){
   h+=`<div class="card"><div class="card-pad">
     <div class="kv"><div class="k" style="font-weight:800">= Lãi tạm</div><div class="v big-num ${lai>=0?'money-pos':'money-neg'}">${(lai>=0?'+ ':'− ')+fmt(Math.abs(lai))}</div></div>
     <div class="hint" style="margin:6px 0 0">Số này có thể âm khi hàng đã làm nhưng chủ chưa trả tiền — chưa phải lãi cuối cùng. Lãi thật (tính lúc giao hàng) xem ở <b>Tổng quan → Lãi &amp; Tiền</b>.</div></div></div>`;
+  /* Tiền đang nằm ở đâu (ảnh chụp HIỆN TẠI, không theo kỳ) — vì sao lãi ≠ tiền mặt */
+  {const kQuy=bal(TK.QUY).net,kPT=bal(TK.PHAI_THU).net,kWIP=bal(TK.WIP).net,kRo=bal(TK.RO_CHUNG).net;
+   const parts=[
+     {v:Math.max(0,kQuy),color:'#2F7A63',name:'Tiền mặt trong két'},
+     {v:Math.max(0,kPT),color:'#C99A2E',name:'Chủ hàng còn nợ (phải thu)'},
+     {v:Math.max(0,kWIP),color:'#5B8AA6',name:'Hàng đang làm dở (WIP)'},
+     {v:Math.max(0,kRo),color:'#9B7BB5',name:'Rổ chung chưa chia'}];
+   const tongTS=parts.reduce((s,p)=>s+p.v,0);
+   const dn=svgDonut(parts,{center:fmtShort(tongTS),centerTop:'Tổng'});
+   if(dn){h+=`<div class="section-h">Tiền đang nằm ở đâu (hiện tại)</div><div class="card"><div class="card-pad">
+     ${dn}
+     <div class="hint" style="margin:10px 0 0">Chỉ phần <b>tiền mặt trong két</b> mới tiêu được. Phần <b>phải thu</b> và <b>WIP</b> là tiền đã bỏ ra hoặc sắp thu — nên lãi cao mà két vẫn ít là bình thường.</div></div></div>`;}}
   /* Vốn — tách riêng */
   if(vonVao||vonRa){h+=`<div class="section-h">Vốn (không tính vào lãi)</div><div class="card"><div class="card-pad">
     ${vonVao?rowT('Bỏ thêm vốn vào xưởng',vonVao,false,'vonvao'):''}
@@ -3523,9 +3597,9 @@ function ltDetail(loai){
   body+=`<div class="hint" style="text-align:center">Bấm một dòng để xem chi tiết, hoàn tác hoặc sửa lại.</div>`;
   openSheet(ten,body);
 }
-function viewChotSo(m){
+function bcChotSo(){
   const data=csRows();
-  let h=`<div class="view-title">Quản lý chốt sổ<small>Sổ thu chi theo ngày · thu gọn hay xem chi tiết</small></div>`;
+  let h=`<div class="hint" style="margin:-6px 2px 12px">📒 Sổ thu chi theo ngày · lấy thẳng từ nhật ký, không nhập tay</div>`;
   h+=`<button class="btn btn-tape" style="margin-bottom:12px" onclick="modalGhiBoSung()">＋ Ghi bổ sung ngày trước</button>`;
   if(DB._xoaTam){const x=DB._xoaTam;
     h+=`<div class="card" style="margin-bottom:12px;border:1px dashed var(--thread-soft);background:var(--sage-soft)">
@@ -3539,7 +3613,7 @@ function viewChotSo(m){
       </div></div>`;
   }
   h+=perBar(csMode,csRef,'csSetMode','csNav','');
-  if(!data.days.length){m.innerHTML=h+`<div class="empty"><div class="ic">📒</div><b>Chưa có thu chi</b>Khoảng thời gian này chưa ghi gì.</div>`;return;}
+  if(!data.days.length)return h+`<div class="empty"><div class="ic">📒</div><b>Chưa có thu chi</b>Khoảng thời gian này chưa ghi gì.</div>`;
   const T=data.tot;
   const chenhKD=T.dt-T.cong;            /* doanh thu − công thợ */
   const rongKet=T.vao-T.ra;             /* tiền vào − tiền ra khỏi két */
@@ -3607,7 +3681,7 @@ function viewChotSo(m){
     h+=`</div>`;
   });
   h+=`<div class="hint" style="text-align:center">Số lấy thẳng từ nhật ký, không nhập tay. “Công thợ” là giá trị công đã ghi khi nhận hàng — chưa hẳn là tiền đã trả.</div>`;
-  m.innerHTML=h;
+  return h;
 }
 
 /* ---------- THỢ ---------- */
@@ -4398,7 +4472,7 @@ function doDaoOp(key){const ly=((el('op_ly')&&el('op_ly').value)||'').trim();if(
 /* ---------- TỔNG QUAN (gộp Hôm nay + Thu/Chi + Lợi nhuận) ---------- */
 let tqTab='home';
 let xhMode='thang'; /* biểu đồ: 'thang' | 'ngay' */
-const TQ_MAIN=[['home','Hôm nay'],['laitien','Lãi & Tiền'],['them','Thêm']];
+const TQ_MAIN=[['home','Hôm nay'],['laitien','Lãi & Tiền'],['chotso','Chốt sổ'],['them','Thêm']];
 const TQ_HIDDEN={nhatky:'Nhật ký nhập',thuchi:'Thu / Chi & dòng tiền',xuhuong:'Biểu đồ',khoaky:'Khóa kỳ'};
 /* ===========================================================
    SỔ THU CHI RIÊNG — gắn theo TỪNG THỢ (mọi loại thợ, kể cả chủ).
@@ -4480,7 +4554,7 @@ function viewTongQuan(m){
   if(hidden)h+=`<div style="display:flex;align-items:center;gap:8px;margin:-4px 2px 12px">
     <button class="btn btn-ghost btn-sm" onclick="tqTab='them';render()">‹ Quay lại</button>
     <b style="font-size:15px">${TQ_HIDDEN[tqTab]}</b></div>`;
-  h+=({home:homeBody,laitien:bcLaiTien,them:bcThem,nhatky:bcNhatKy,thuchi:thuChiBody,xuhuong:bcXuHuong,khoaky:bcKhoaKy}[tqTab])();
+  h+=({home:homeBody,laitien:bcLaiTien,chotso:bcChotSo,them:bcThem,nhatky:bcNhatKy,thuchi:thuChiBody,xuhuong:bcXuHuong,khoaky:bcKhoaKy}[tqTab])();
   m.innerHTML=h;
 }
 /* Lãi & Tiền — trái tim của app: lời bao nhiêu + vì sao két không khớp, một màn duy nhất */
@@ -4555,16 +4629,22 @@ function bcXuHuong(){
   const tongLai=sum(lai),tongVao=sum(vao),tongRa=sum(ra);
   const laiGroups=lai.map(v=>[{v,color:v>=0?'#2F7A63':'#C0392B'}]);
   const dtGroups=keys.map((k,i)=>[{v:vao[i],color:'#2F7A63'},{v:ra[i],color:'#C0392B'}]);
+  let _cum=0;const soDu=keys.map((k,i)=>_cum+=(vao[i]-ra[i]));
   const byMau={};DB.don.filter(d=>bal(TK.DOANH_THU,x=>x.donId===d.id).co>0).forEach(d=>{byMau[d.mauId]=(byMau[d.mauId]||0)+laiDon(d).lai;});
   const topMau=Object.entries(byMau).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const maxMau=Math.max(1,...topMau.map(([,v])=>Math.abs(v)));
   let h=`<div class="tabs" style="margin-bottom:12px"><button class="${mode==='ngay'?'on':''}" onclick="xhMode='ngay';render()">Ngày</button><button class="${mode==='tuan'?'on':''}" onclick="xhMode='tuan';render()">Tuần</button><button class="${mode==='thang'?'on':''}" onclick="xhMode='thang';render()">Tháng</button></div><div class="section-h" style="margin-top:2px">Lãi ròng theo ${donVi}</div><div class="card"><div class="card-pad">
-    ${svgChart(labels,laiGroups,{showVal:mode!=='ngay',h:150})}
+    ${svgLine(labels,lai,{showVal:true,h:150})}
+    <div class="hint" style="text-align:center;margin-top:2px">Đường đi lên = đang lời dần · chạm vùng đỏ = ${donVi} đó lỗ.</div>
     <div class="kv" style="margin-top:8px"><div class="k">Tổng ${kyTxt}</div><div class="v big-num ${tongLai>=0?'money-pos':'money-neg'}">${fmt(tongLai)}</div></div></div></div>`;
   h+=`<div class="section-h">Dòng tiền vào / ra theo ${donVi}</div><div class="card"><div class="card-pad">
     ${svgChart(labels,dtGroups,{h:150})}
     ${chartLegend([{name:'Tiền vào',color:'#2F7A63'},{name:'Tiền ra',color:'#C0392B'}])}
-    <div class="kv" style="margin-top:8px"><div class="k">Vào − ra (${kyTxt})</div><div class="v big-num ${(tongVao-tongRa)>=0?'money-pos':'money-neg'}">${fmt(tongVao-tongRa)}</div></div></div></div>`;
+    <div class="kv" style="margin-top:8px"><div class="k">Vào − ra (${kyTxt})</div><div class="v big-num ${(tongVao-tongRa)>=0?'money-pos':'money-neg'}">${fmt(tongVao-tongRa)}</div></div>
+    <div style="border-top:1px dashed var(--line-2);margin:12px 0 8px"></div>
+    <div class="hint" style="margin:0 0 2px;text-align:center;font-weight:700;color:var(--ink-2)">Két dồn theo ${donVi} (trong khoảng đang xem)</div>
+    ${svgLine(labels,soDu,{showVal:true,h:120})}
+    <div class="hint" style="text-align:center;margin-top:2px">Đường xuống dốc = tiền két đang vơi dần.</div></div></div>`;
   h+=`<div class="section-h">Mẫu đóng góp lãi nhiều nhất</div><div class="card"><div class="card-pad">`;
   h+=topMau.length?topMau.map(([id,v])=>{const w=Math.round(Math.abs(v)/maxMau*100);
     return `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
