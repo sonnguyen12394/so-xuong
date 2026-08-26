@@ -3303,6 +3303,9 @@ function csItemLabel(s){
 function csGroupOf(bt){
   if(bt.dao_cua||bt.daDao)return null;               /* bỏ bút toán đảo & bản đã sửa */
   const s=bt.suKien;
+  /* backfill "nhập lại lịch sử" (đơn cũ đã xong ngoài app) KHÔNG phải thu/chi phát sinh trong ngày
+     → không liệt vào Sổ thu chi. Nợ lương thợ / doanh thu vẫn nằm nguyên ở Thợ · Chủ hàng · Lãi. */
+  if(/^Công thợ \(lịch sử\)|^Doanh thu \(lịch sử\)/.test(s))return null;
   const meta=k=>{for(const d of bt.dong)if(d[k]!=null)return d[k];return null;};
   const thoId=meta('thoId'),chuId=meta('chuHangId'),donId=meta('donId');
   const don=donId?getDon(donId):null;const donPre=don?don.ma+' · ':'';
@@ -3318,17 +3321,6 @@ function csGroupOf(bt){
   if(/^Chốt lương/.test(s)){
     const t=thoId?getTho(thoId):null;
     return {nature:'cong',gkey:'tho_'+(thoId||'owner'),icon:'🧵',title:(t?t.ten:'Thợ'),amount:ptt,sub:csItemLabel(s)};}
-  /* 2b) Công thợ nhập lại lịch sử — không qua WIP, tính bằng phần nợ lương ghi thêm */
-  if(/^Công thợ \(lịch sử\)/.test(s)){
-    const t=thoId?getTho(thoId):null;
-    return {nature:'cong',gkey:'tho_'+(thoId||'owner'),icon:'🧵',title:(t?t.ten:'Thợ'),amount:ptt,sub:'công (lịch sử)'};}
-  /* 3b) Doanh thu nhập lại lịch sử */
-  if(/^Doanh thu \(lịch sử\)/.test(s)){
-    const c=chuId?getChu(chuId):null;
-    const dl=bt.dong.find(d=>d.tk===TK.DOANH_THU)||{};
-    const mt=dl.mauId?((getMau(dl.mauId)||{}).ten||''):'';
-    const lab=(dl.ghiChu&&mt&&dl.ghiChu.indexOf(mt)>=0)?dl.ghiChu:((dl.ghiChu&&mt)?(dl.ghiChu+' · '+mt):(dl.ghiChu||mt||''));
-    return {nature:'dt',gkey:'dt_'+(chuId||'x'),icon:'📦',title:(c?c.ten:'Chủ hàng')+' — giao hàng',amount:dt,sub:'đơn đã xong'+(lab?' · '+lab:'')+' (lịch sử)'};}
   /* 3) Doanh thu — giao thành phẩm / tháo thu chủ / đảo trả lại */
   if(/^Giao thành phẩm|^Tháo — thu công|^Hàng bị trả lại — đảo doanh thu/.test(s)){
     const c=chuId?getChu(chuId):null;
