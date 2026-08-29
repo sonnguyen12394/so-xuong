@@ -899,23 +899,24 @@ function rutVon({soTien,dienGiai,ngay}){beginOp();
   ghi('Chủ rút tiền về nhà'+(dienGiai?': '+dienGiai:''),[
     {tk:TK.VON,chieu:'NO',soTien},{tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
-function boVon({soTien,dienGiai,ngay}){beginOp();
-  ghi('Chủ bỏ thêm tiền vào xưởng'+(dienGiai?': '+dienGiai:''),[
-    {tk:TK.QUY,chieu:'NO',soTien},{tk:TK.VON,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
+function boVon({soTien,dienGiai,ngay,dichQuy}){beginOp();
+  const qline={tk:TK.QUY,chieu:'NO',soTien};if(dichQuy==='chi')qline.quy='chi';
+  ghi('Chủ bỏ thêm tiền vào xưởng'+(dichQuy==='chi'?' (thẳng Quỹ phụ)':'')+(dienGiai?': '+dienGiai:''),[
+    qline,{tk:TK.VON,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
 /* ===== HAI QUỸ (cùng một két, hai túi) — chỉ là lát cắt của TK.QUY, KHÔNG phải tài khoản mới =====
    • Quỹ chính  = tiền bạn trực tiếp giữ (chủ hàng trả/ứng, vốn, trừ lương/rút) → dòng QUY KHÔNG nhãn.
-   • Quỹ chi    = tiền đã đưa người giữ để chi hộ → dòng QUY nhãn quy:'chi'.
+   • Quỹ chi    = tiền đã đưa nhân viên để chi hộ → dòng QUY nhãn quy:'chi'.
    Tổng hai quỹ = bal(TK.QUY).net (không đổi) ⇒ cầu nối/chốt sổ/header giữ nguyên, không thể vỡ. */
-function quyChi(){return bal(TK.QUY,d=>d.quy==='chi').net;}     // người giữ còn cầm bao nhiêu = nạp − đã chi
+function quyChi(){return bal(TK.QUY,d=>d.quy==='chi').net;}     // nhân viên còn cầm bao nhiêu = nạp − đã chi
 function quyChinh(){return bal(TK.QUY,d=>d.quy!=='chi').net;}   // bạn còn trực tiếp giữ bao nhiêu
-/* chuyển tiền từ quỹ chính → quỹ chi (nạp cho người giữ). Đổi túi, KHÔNG phải chi phí,
+/* chuyển tiền từ quỹ chính → quỹ chi (nạp cho nhân viên). Đổi túi, KHÔNG phải chi phí,
    tổng két không đổi (QUY +s ở nhãn chi, −s ở nhãn chính → net 0), không hiện ở chốt sổ. */
 function chuyenQuy({soTien,dienGiai,ngay}){beginOp();
-  ghi('Nạp quỹ chi cho người giữ'+(dienGiai?': '+dienGiai:''),[
+  ghi('Nạp Quỹ phụ cho nhân viên'+(dienGiai?': '+dienGiai:''),[
     {tk:TK.QUY,chieu:'NO',soTien,quy:'chi'},{tk:TK.QUY,chieu:'CO',soTien,quy:'chinh'}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
-/* người giữ trả tiền thừa về cho bạn (quỹ chi → quỹ chính) */
+/* nhân viên trả tiền thừa về cho bạn (quỹ chi → quỹ chính) */
 function traQuyChi({soTien,dienGiai,ngay}){beginOp();
   ghi('Người giữ trả lại tiền thừa'+(dienGiai?': '+dienGiai:''),[
     {tk:TK.QUY,chieu:'NO',soTien,quy:'chinh'},{tk:TK.QUY,chieu:'CO',soTien,quy:'chi'}],ngay?{thoiDiem:ngay}:null);Store.save();
@@ -1308,10 +1309,11 @@ function modalChiPhiLo(maLo){openSheet('Chi phí CHUNG cả lô '+maLo,`
   <div class="hint" style="margin-top:0;margin-bottom:12px">Khoản chi cho <b>cả lô</b> (ship giao/nhận, phụ liệu chung). Ghi 1 lần — hệ <b>tự chia</b> vào các mẫu theo tiền công, trừ tiền mặt trong két. Tiền <b>đền hàng hư</b> của một mẫu thì ghi ở mẫu đó (nút Tiền đền).</div>
   <div class="field"><label>Chi cho việc gì</label><input id="cplo_dg" placeholder="VD: Ship giao cả lô"></div>
   <div class="field"><label>Số tiền (cả lô)</label><input type="text" inputmode="numeric" class="sep" id="cplo_sl" value="0" onfocus="this.select()"></div>
+  ${quySeg('cplo')}
   <button class="btn btn-primary" onclick="submitChiPhiLo('${maLo}')">Ghi chi phí lô</button>`);}
 function submitChiPhiLo(maLo){try{const s=numVal('cplo_sl'),dg=(el('cplo_dg')&&el('cplo_dg').value.trim())||'ship/phụ liệu';
   if(s<=0)return toast('Nhập số tiền.',true);
-  chiPhiLo({maLo,soTien:s,dienGiai:dg});
+  chiPhiLo({maLo,soTien:s,dienGiai:dg,quy:readQuy('cplo')});
   closeSheet();render();modalLo(maLo);toastUndo('Đã ghi chi phí lô — đã chia vào các mẫu.');}catch(e){toast(e.message,true)}}
 /* Bóc tách giá vốn của một đơn NHẬP TAY (lịch sử) — gom theo histId=slipId.
    Đơn nhập tay không có WIP: giá vốn = công định mức (+ chi phí khác gắn sau nếu có). */
@@ -1465,7 +1467,7 @@ function laiTheoThang(keys){const m={};keys.forEach(k=>m[k]=0);
       else if(d.tk===TK.GIA_VON)m[k]-=(d.chieu==='NO'?d.soTien:-d.soTien);
       else if(d.tk===TK.LO_KHAC)m[k]-=(d.chieu==='NO'?d.soTien:-d.soTien);});});
   return keys.map(k=>m[k]);}
-/* nạp/trả quỹ chi = chuyển tiền giữa 2 túi của bạn (mọi dòng đều QUY) → KHÔNG phải dòng tiền vào/ra */
+/* nạp/trả Quỹ phụ = chuyển tiền giữa 2 túi của bạn (mọi dòng đều QUY) → KHÔNG phải dòng tiền vào/ra */
 function laChuyenTui(bt){return bt.dong.length>0&&bt.dong.every(d=>d.tk===TK.QUY);}
 function dongTienTheoThang(keys){const vao={},ra={};keys.forEach(k=>{vao[k]=0;ra[k]=0;});
   DB.butToan.forEach(bt=>{if(laChuyenTui(bt))return;const k=ymKey(bt.thoiDiem);if(!(k in vao))return;
@@ -1658,13 +1660,7 @@ function homeBody(){
     <button class="btn btn-sage btn-sm" onclick="modalChonChuThu()">💵 Thu tiền</button>
     <button class="btn btn-ghost btn-sm" onclick="modalChiPhi()">🧵 Chi tiền xưởng</button>
     <button class="btn btn-ghost btn-sm wide" onclick="tqTab='nhatky';render()">🗒️ Lịch sử nhập — xem & sửa phát sinh</button></div>`;
-  // Hai quỹ: tiền bạn giữ vs tiền đưa người giữ chi hộ (cùng một tổng)
-  {const qc=quyChinh(),qk=quyChi(),tong=qc+qk;
-   h+=`<div class="card" style="margin:8px 0 2px"><div class="card-pad">
-     <div class="kv"><div class="k">💼 Quỹ bạn giữ</div><div class="v">${fmt(qc)}</div></div>
-     <div class="kv"><div class="k">🧑‍💼 ${qk<0?'<span style=\"color:var(--thread)\">Nợ người giữ</span>':'Quỹ người giữ (còn)'}</div><div class="v ${qk<0?'money-neg':''}">${fmt(qk<0?-qk:qk)}</div></div>
-     <div class="kv" style="border-top:1px solid var(--line);margin-top:4px;padding-top:8px"><div class="k" style="font-weight:800">Tổng tiền mặt</div><div class="v big-num">${fmt(tong)}</div></div>
-     <div style="margin-top:10px"><button class="btn btn-ghost btn-sm wide" onclick="modalNapQuyChi()">🧑‍💼 Nạp / trả quỹ chi người giữ</button></div></div></div>`;}
+  // (Thẻ Quỹ chính/phụ ở Tổng quan đã bỏ — xem chi tiết 2 túi qua pill "Tiền trong két" ở đầu trang)
 
   // Việc nên làm — hàng bấm mở thẳng modal sẵn có
   const jobs=[];
@@ -2562,20 +2558,22 @@ function modalChiPhiDon(donId){openSheet('Chi phí riêng mẫu này',`
   <div class="field"><label>Chi cho việc gì</label><input id="cpd_dg" placeholder="VD: Ship riêng mẫu, kim chỉ riêng"></div>
   <div class="field"><label>Số tiền</label><input type="text" inputmode="numeric" class="sep" id="cpd_sl" value="0" onfocus="this.select()"></div>
   <div class="hint" style="margin-bottom:14px">Chi phí này chỉ tính cho <b>riêng mẫu này</b>, không chia sang mẫu khác trong lô. Khoản dùng chung cả lô (ship gộp, phụ liệu chung) thì ghi ở <b>màn Lô</b>.</div>
+  ${quySeg('cpd')}
   <button class="btn btn-primary" onclick="submitChiPhiDon('${donId}')">Ghi chi phí</button>`);}
 function submitChiPhiDon(donId){try{const s=numVal('cpd_sl'),dg=el('cpd_dg').value||'chi phí đơn';
-  if(s<=0)return toast('Nhập số tiền.',true);chiPhiDon({donId,soTien:s,dienGiai:dg});
+  if(s<=0)return toast('Nhập số tiền.',true);chiPhiDon({donId,soTien:s,dienGiai:dg,quy:readQuy('cpd')});
   closeSheet();render();modalDon(donId);toastUndo('Đã ghi chi phí cho đơn.');}catch(e){toast(e.message,true)}}
 /* Chi phí phát sinh cho đơn ĐÃ XONG — nhập nhanh, vào thẳng giá vốn đơn */
 function modalChiPhiXong(donId){const don=getDon(donId);openSheet('Chi phí phát sinh cho đơn',`
   <div class="hint" style="margin-top:0;margin-bottom:12px">Đơn <b>${don?don.ma:''}</b> đã xong nhưng còn khoản phát sinh (ship trả thêm, phụ liệu, đền bù…). Ghi vào đây là cộng thẳng vào <b>giá vốn của đơn</b>, trừ tiền mặt trong két.</div>
   <div class="field"><label>Chi cho việc gì</label><input id="cpx_dg" placeholder="VD: Ship trả lại, đền phụ liệu"></div>
   <div class="field"><label>Số tiền</label><input type="text" inputmode="numeric" class="sep" id="cpx_sl" value="0" onfocus="this.select()"></div>
+  ${quySeg('cpx')}
   <button class="btn btn-primary" onclick="submitChiPhiXong('${donId}')">Ghi chi phí phát sinh</button>`);}
 function submitChiPhiXong(donId){try{const don=getDon(donId);const s=numVal('cpx_sl'),dg=(el('cpx_dg')&&el('cpx_dg').value.trim())||'phát sinh';
-  if(s<=0)return toast('Nhập số tiền.',true);
-  if(don&&don.trangThai==='DA_GIAO_DU')chiPhiDonXong({donId,soTien:s,dienGiai:dg});
-  else chiPhiDon({donId,soTien:s,dienGiai:dg});   // đơn còn chạy → vào WIP như thường
+  if(s<=0)return toast('Nhập số tiền.',true);const qy=readQuy('cpx');
+  if(don&&don.trangThai==='DA_GIAO_DU')chiPhiDonXong({donId,soTien:s,dienGiai:dg,quy:qy});
+  else chiPhiDon({donId,soTien:s,dienGiai:dg,quy:qy});   // đơn còn chạy → vào WIP như thường
   closeSheet();render();modalDon(donId);toastUndo('Đã ghi chi phí phát sinh.');}catch(e){toast(e.message,true)}}
 /* ---- Tiền xe giao hàng (chọn người giao) ---- */
 let _gxTho='';
@@ -2615,9 +2613,10 @@ function toastGoGiao(msg,id){const t=el('toast');if(!t)return;t.style.display='f
 function modalTienDen(donId){openSheet('Tiền đền hàng hư',`
   <div class="field"><label>Số tiền đền cho chủ hàng / thợ khác</label><input type="text" inputmode="numeric" class="sep" id="td_sl" value="0" onfocus="this.select()"></div>
   <div class="hint" style="margin-bottom:14px">Đây là chi phí thật khi làm hư hàng, tính vào giá vốn của đơn.</div>
+  ${quySeg('td')}
   <button class="btn btn-primary" onclick="submitTienDen('${donId}')">Ghi tiền đền</button>`);}
 function submitTienDen(donId){try{const s=numVal('td_sl');if(s<=0)return toast('Nhập số tiền.',true);
-  tienDen({donId,soTien:s});closeSheet();render();modalDon(donId);toastUndo('Đã ghi tiền đền.');}catch(e){toast(e.message,true)}}
+  tienDen({donId,soTien:s,quy:readQuy('td')});closeSheet();render();modalDon(donId);toastUndo('Đã ghi tiền đền.');}catch(e){toast(e.message,true)}}
 
 /* ---------- Cắt châm ---------- */
 function modalXinCham(donId){const don=getDon(donId);openSheet('Xin cắt châm',`
@@ -2912,12 +2911,17 @@ function modalChiPhi(){openSheet('Ghi chi tiền xưởng',`
   <div class="field"><label>Số tiền</label><input type="text" inputmode="numeric" class="sep" id="cp_sl" value="0" onfocus="this.select()"></div>
   <div class="hint" style="margin-bottom:10px">Chi phí chung tự chia vào các đơn theo tiền công.</div>
   ${quySeg('cp')}
+  <div class="field"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0"><input type="checkbox" id="cp_tutui" style="width:20px;height:20px"><span>Chủ tự bỏ túi trả (tiền chưa có sẵn trong két)</span></label>
+    <div class="hint" style="margin-top:6px">Tick khi chủ xưởng móc tiền túi trả thẳng khoản này: app tự cộng <b>vốn</b> tương ứng, vào <b>Quỹ chính</b>, để két không bị âm.</div></div>
   <div class="warn-box" style="margin-bottom:14px">Tiền rút cho <b>việc nhà</b> không phải chi phí của xưởng — ghi ở đây sẽ làm lãi sai.
     <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="modalRutVon()">🏠 Chuyển sang ghi Rút tiền về nhà</button></div></div>
   <button class="btn btn-primary" onclick="submitChiPhi()">Ghi chi tiền</button>`);}
 function submitChiPhi(){try{const s=numVal('cp_sl'),dg=el('cp_dg').value||'chi phí xưởng';
-  if(s<=0)return toast('Nhập số tiền.',true);chiPhiXuong({soTien:s,dienGiai:dg,quy:readQuy('cp')});
-  closeSheet();render();toastUndo('Đã ghi chi tiền.');}catch(e){toast(e.message,true)}}
+  if(s<=0)return toast('Nhập số tiền.',true);
+  const tuTui=el('cp_tutui')&&el('cp_tutui').checked;
+  if(tuTui){boVon({soTien:s,dienGiai:'tự bỏ túi trả '+dg,dichQuy:'chinh'});chiPhiXuong({soTien:s,dienGiai:dg,quy:'chinh'});}
+  else chiPhiXuong({soTien:s,dienGiai:dg,quy:readQuy('cp')});
+  closeSheet();render();toastUndo(tuTui?'Đã ghi chi + tự cộng vốn (chủ bỏ túi).':'Đã ghi chi tiền.');}catch(e){toast(e.message,true)}}
 function modalRutVon(){const quy=bal(TK.QUY).net;openSheet('Rút tiền về nhà',`
   <div class="warn-box">Tiền rút cho việc nhà <b>không phải chi phí</b> — nó không làm giảm lãi, chỉ giảm phần vốn của bạn trong xưởng. Xưởng lãi bao nhiêu và bạn rút bao nhiêu là hai chuyện độc lập.</div>
   <div class="field"><label>Số tiền rút (két đang có ${fmt(quy)})</label><input type="text" inputmode="numeric" class="sep" id="rv_sl" value="0" onfocus="this.select()"></div>
@@ -2926,32 +2930,48 @@ function modalRutVon(){const quy=bal(TK.QUY).net;openSheet('Rút tiền về nh�
 function submitRutVon(){try{const s=numVal('rv_sl');if(s<=0)return toast('Nhập số tiền.',true);
   rutVon({soTien:s,dienGiai:el('rv_dg').value.trim()});closeSheet();render();toastUndo('Đã ghi rút tiền về nhà.');}catch(e){toast(e.message,true)}}
 function modalBoVon(){openSheet('Bỏ thêm tiền vào xưởng',`
-  <div class="hint" style="margin-bottom:14px">Tiền túi bạn tự bỏ vào xưởng làm vốn xoay → vào <b>Quỹ 1 (bạn giữ)</b>. Không phải doanh thu, tính là <b>vốn</b> của bạn. Muốn đưa cho người giữ chi thì sau đó bấm "Nạp quỹ chi".</div>
+  <div class="hint" style="margin-bottom:14px">Tiền túi chủ xưởng tự bỏ vào làm <b>vốn</b> xoay vòng (không phải doanh thu). Chọn bỏ vào quỹ nào bên dưới.</div>
   ${mucChips('bo','bv_dg','bv_sl')}
   <div class="field"><label>Số tiền bỏ vào</label><input type="text" inputmode="numeric" class="sep" id="bv_sl" value="0" onfocus="this.select()"></div>
+  <div class="field"><label>Bỏ tiền vào quỹ nào?</label>
+    <div style="display:flex;gap:8px" id="bv_seg" data-q="chinh">
+      <button type="button" class="chip sel" style="flex:1" onclick="pickQuy('bv','chinh',this)">💼 Quỹ chính · chủ xưởng</button>
+      <button type="button" class="chip" style="flex:1" onclick="pickQuy('bv','chi',this)">🧑‍💼 Quỹ phụ · nhân viên</button>
+    </div>
+    <div class="hint" style="margin-top:6px">Bỏ thẳng vào <b>Quỹ phụ</b> = đưa luôn tiền cho nhân viên chi hộ (khỏi phải nạp thêm bước sau).</div></div>
   <div class="field"><label>Ghi chú (không bắt buộc)</label><input id="bv_dg" placeholder="VD: Vay người nhà, tiền tiết kiệm"></div>
   <button class="btn btn-primary" onclick="submitBoVon()">Ghi bỏ vốn</button>`);}
 function submitBoVon(){try{const s=numVal('bv_sl');if(s<=0)return toast('Nhập số tiền.',true);
-  boVon({soTien:s,dienGiai:el('bv_dg').value.trim()});closeSheet();render();toastUndo('Đã ghi bỏ thêm tiền vào xưởng.');}catch(e){toast(e.message,true)}}
-function modalNapQuyChi(){const c=quyChinh(),k=quyChi();openSheet('Nạp quỹ chi cho người giữ',`
-  <div class="hint" style="margin-bottom:12px">Chuyển tiền từ <b>quỹ bạn giữ</b> sang <b>quỹ người giữ</b> để họ chi hộ (điện, phụ liệu, ship…). Đây <b>không phải chi phí</b> — chỉ đổi túi, tổng tiền không đổi.</div>
+  const dq=readQuy('bv');
+  boVon({soTien:s,dienGiai:el('bv_dg').value.trim(),dichQuy:dq});closeSheet();render();
+  toastUndo(dq==='chi'?'Đã bỏ vốn thẳng vào Quỹ phụ (nhân viên).':'Đã ghi bỏ thêm tiền vào xưởng.');}catch(e){toast(e.message,true)}}
+function modalNapQuyChi(){const c=quyChinh(),k=quyChi();openSheet('Nạp Quỹ phụ cho nhân viên',`
+  <div class="hint" style="margin-bottom:12px">Chuyển tiền từ <b>quỹ chính</b> sang <b>quỹ phụ</b> để họ chi hộ (điện, phụ liệu, ship…). Đây <b>không phải chi phí</b> — chỉ đổi túi, tổng tiền không đổi.</div>
   <div class="card" style="margin-bottom:14px"><div class="card-pad">
-    <div class="kv"><div class="k">Quỹ bạn giữ (rút ra)</div><div class="v">${fmt(c)}</div></div>
-    <div class="kv"><div class="k">Quỹ người giữ đang còn</div><div class="v">${fmt(k)}</div></div></div></div>
+    <div class="kv"><div class="k">Quỹ chính (rút ra)</div><div class="v">${fmt(c)}</div></div>
+    <div class="kv"><div class="k">Quỹ phụ đang còn</div><div class="v">${fmt(k)}</div></div></div></div>
   <div class="field"><label>Số tiền nạp</label><input type="text" inputmode="numeric" class="sep" id="nq_sl" value="0" onfocus="this.select()"></div>
+  <div class="field"><label>Ngày nạp</label><input type="date" id="nq_ngay" value="${dayKey(now())}" max="${dayKey(now())}"></div>
   <div class="field"><label>Ghi chú (không bắt buộc)</label><input id="nq_dg" placeholder="VD: Đổ quỹ chi đầu tuần"></div>
-  <button class="btn btn-primary" onclick="submitNapQuyChi()">Nạp quỹ chi</button>
+  <button class="btn btn-primary" onclick="submitNapQuyChi()">Nạp Quỹ phụ</button>
   <div style="height:8px"></div>
   <button class="btn btn-ghost" onclick="modalTraQuyChi()">↩︎ Người giữ trả lại tiền thừa</button>`);}
 function submitNapQuyChi(){try{const s=numVal('nq_sl');if(s<=0)return toast('Nhập số tiền.',true);
-  chuyenQuy({soTien:s,dienGiai:el('nq_dg').value.trim()});closeSheet();render();toastUndo('Đã nạp quỹ chi cho người giữ.');}catch(e){toast(e.message,true)}}
+  const dstr=(el('nq_ngay')||{}).value||'';if(!dstr)return toast('Chọn ngày nạp.',true);
+  const ts=kmTs(dstr);if(ts>now())return toast('Không ghi cho ngày chưa tới.',true);
+  if(DB.settings.kyKhoa&&DB.settings.kyKhoaTime&&ts<=DB.settings.kyKhoaTime)return toast('Ngày này đã khóa sổ — không ghi thêm được.',true);
+  chuyenQuy({soTien:s,dienGiai:el('nq_dg').value.trim(),ngay:ts});closeSheet();render();toastUndo('Đã nạp quỹ chi cho nhân viên.');}catch(e){toast(e.message,true)}}
 function modalTraQuyChi(){const k=quyChi();openSheet('Người giữ trả lại tiền thừa',`
-  <div class="hint" style="margin-bottom:12px">Người giữ trả tiền còn dư về cho bạn — tiền chạy ngược từ <b>quỹ người giữ</b> về <b>quỹ bạn giữ</b>. Quỹ người giữ đang còn ${fmt(k)}.</div>
+  <div class="hint" style="margin-bottom:12px">Người giữ trả tiền còn dư về cho bạn — tiền chạy ngược từ <b>quỹ phụ</b> về <b>quỹ chính</b>. Quỹ phụ đang còn ${fmt(k)}.</div>
   <div class="field"><label>Số tiền trả lại</label><input type="text" inputmode="numeric" class="sep" id="tq_sl" value="0" onfocus="this.select()"></div>
+  <div class="field"><label>Ngày trả</label><input type="date" id="tq_ngay" value="${dayKey(now())}" max="${dayKey(now())}"></div>
   <div class="field"><label>Ghi chú (không bắt buộc)</label><input id="tq_dg" placeholder="VD: Cuối tháng trả dư"></div>
   <button class="btn btn-primary" onclick="submitTraQuyChi()">Ghi trả lại</button>`);}
 function submitTraQuyChi(){try{const s=numVal('tq_sl');if(s<=0)return toast('Nhập số tiền.',true);
-  traQuyChi({soTien:s,dienGiai:el('tq_dg').value.trim()});closeSheet();render();toastUndo('Đã ghi người giữ trả lại tiền thừa.');}catch(e){toast(e.message,true)}}
+  const dstr=(el('tq_ngay')||{}).value||'';if(!dstr)return toast('Chọn ngày trả.',true);
+  const ts=kmTs(dstr);if(ts>now())return toast('Không ghi cho ngày chưa tới.',true);
+  if(DB.settings.kyKhoa&&DB.settings.kyKhoaTime&&ts<=DB.settings.kyKhoaTime)return toast('Ngày này đã khóa sổ — không ghi thêm được.',true);
+  traQuyChi({soTien:s,dienGiai:el('tq_dg').value.trim(),ngay:ts});closeSheet();render();toastUndo('Đã ghi nhân viên trả lại tiền thừa.');}catch(e){toast(e.message,true)}}
 function suaKhoanAuto(btId){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)return;
   if(bt.dong.some(d=>d.loai==='PHAT_SINH_THO'))return modalSuaPhatSinh(btId);
   modalSuaKhoan(btId);}
@@ -2960,7 +2980,7 @@ function quyRows(which){const pred=which==='chi'?(d=>d.tk===TK.QUY&&d.quy==='chi
   for(const bt of arr){let s=0;for(const d of bt.dong)if(pred(d))s+=(d.chieu==='NO'?d.soTien:-d.soTien);if(!s)continue;run+=s;rows.push({bt,s,run});}
   return rows;}
 function modalQuyChiTiet(which){const rows=quyRows(which).reverse();
-  const title=which==='chi'?'Quỹ người giữ — chi tiết':'Quỹ bạn giữ — chi tiết';
+  const title=which==='chi'?'Quỹ phụ — chi tiết':'Quỹ chính — chi tiết';
   const sd=which==='chi'?quyChi():quyChinh();
   let h=`<div class="hint" style="margin-bottom:10px">Số dư hiện tại: <b>${fmt(sd)}</b>. Xếp mới nhất trên cùng; dòng nhỏ bên phải là số dư sau mỗi khoản — dùng để dò ngược.</div>`;
   if(!rows.length){h+=`<div class="divider-note" style="padding:14px">Chưa có khoản nào ở quỹ này.</div>`;}
@@ -2971,29 +2991,29 @@ function modalQuyChiTiet(which){const rows=quyRows(which).reverse();
       <div style="text-align:right;white-space:nowrap"><div class="${pos?'money-pos':'money-neg'}" style="font-weight:700">${pos?'+':'−'}${fmt(Math.abs(r.s))}</div><div style="font-size:11px;color:var(--ink-2);margin-top:1px">${fmt(r.run)}</div></div></div>`;
   }).join('')+`</div></div>`;}
   openSheet(title,h);}
-/* Nút chọn quỹ trả cho một khoản chi — mặc định Quỹ 2 (người giữ). id để đọc lại lúc submit. */
+/* Nút chọn quỹ trả cho một khoản chi — mặc định Quỹ phụ (nhân viên). id để đọc lại lúc submit. */
 function quySeg(id,val){val=val||'chi';return `<div class="field"><label>Trả từ quỹ nào?</label>
   <div style="display:flex;gap:8px" id="${id}_seg" data-q="${val}">
-    <button type="button" class="chip${val==='chi'?' sel':''}" style="flex:1" onclick="pickQuy('${id}','chi',this)">🧑‍💼 Quỹ 2 · người giữ</button>
-    <button type="button" class="chip${val==='chinh'?' sel':''}" style="flex:1" onclick="pickQuy('${id}','chinh',this)">💼 Quỹ 1 · bạn giữ</button>
+    <button type="button" class="chip${val==='chi'?' sel':''}" style="flex:1" onclick="pickQuy('${id}','chi',this)">🧑‍💼 Quỹ phụ · nhân viên</button>
+    <button type="button" class="chip${val==='chinh'?' sel':''}" style="flex:1" onclick="pickQuy('${id}','chinh',this)">💼 Quỹ chính · chủ xưởng</button>
   </div>
-  <div class="hint" style="margin-top:6px">Mặc định người giữ (Quỹ 2) trả. Bấm "Quỹ 1" nếu bạn tự bỏ tiền trả khoản này.</div></div>`;}
+  <div class="hint" style="margin-top:6px">Mặc định <b>Quỹ phụ</b> (nhân viên) chi. Bấm <b>Quỹ chính</b> nếu tiền trả ra từ két chủ xưởng.</div></div>`;}
 function pickQuy(id,val,btn){const seg=el(id+'_seg');if(!seg)return;seg.dataset.q=val;
   seg.querySelectorAll('.chip').forEach(b=>b.classList.remove('sel'));btn.classList.add('sel');}
 function readQuy(id){const seg=el(id+'_seg');return seg?(seg.dataset.q||'chi'):'chi';}
 function modalKet(){const qc=quyChinh(),qk=quyChi(),tong=qc+qk,no=qk<0?-qk:0;openSheet('Tiền trong két',`
   <div class="hint" style="margin-bottom:12px">Tổng tiền mặt chia làm 2 túi để bạn dễ đối chiếu với tiền thật đang cầm.</div>
   <div class="card"><div class="card-pad">
-    <div class="kv" onclick="modalQuyChiTiet('chinh')" style="cursor:pointer"><div class="k">💼 Quỹ bạn giữ ›</div><div class="v big-num">${fmt(qc)}</div></div>
-    <div class="hint" style="margin:-2px 0 10px">Tiền thật bạn đang cầm: chủ hàng trả/ứng + vốn, trừ nạp cho người giữ & rút về nhà.</div>
+    <div class="kv" onclick="modalQuyChiTiet('chinh')" style="cursor:pointer"><div class="k">💼 Quỹ chính ›</div><div class="v big-num">${fmt(qc)}</div></div>
+    <div class="hint" style="margin:-2px 0 10px">Tiền thật bạn đang cầm: chủ hàng trả/ứng + vốn, trừ nạp cho nhân viên & rút về nhà.</div>
     ${qk>=0
-      ? `<div class="kv" onclick="modalQuyChiTiet('chi')" style="cursor:pointer"><div class="k">🧑‍💼 Quỹ người giữ (còn) ›</div><div class="v big-num">${fmt(qk)}</div></div>
-         <div class="hint" style="margin:-2px 0 6px">Tiền bạn đã đưa người giữ, trừ dần mỗi khoản chi (gồm cả lương thợ).</div>`
-      : `<div class="kv" onclick="modalQuyChiTiet('chi')" style="cursor:pointer"><div class="k" style="color:var(--thread)">🧑‍💼 Bạn đang nợ người giữ ›</div><div class="v big-num money-neg">${fmt(no)}</div></div>
+      ? `<div class="kv" onclick="modalQuyChiTiet('chi')" style="cursor:pointer"><div class="k">🧑‍💼 Quỹ phụ (còn) ›</div><div class="v big-num">${fmt(qk)}</div></div>
+         <div class="hint" style="margin:-2px 0 6px">Tiền bạn đã đưa nhân viên, trừ dần mỗi khoản chi (gồm cả lương thợ).</div>`
+      : `<div class="kv" onclick="modalQuyChiTiet('chi')" style="cursor:pointer"><div class="k" style="color:var(--thread)">🧑‍💼 Bạn đang nợ nhân viên ›</div><div class="v big-num money-neg">${fmt(no)}</div></div>
          <div class="hint" style="margin:-2px 0 6px">Người giữ đã lấy tiền túi trả giúp <b>${fmt(no)}</b> (chi vượt số bạn nạp). Bấm nút dưới để trả lại họ.</div>`}
-    <div class="kv" style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px"><div class="k" style="font-weight:800">${qk<0?'Tiền còn lại (sau khi trả người giữ)':'Tổng tiền mặt'}</div><div class="v big-num">${fmt(tong)}</div></div>
+    <div class="kv" style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px"><div class="k" style="font-weight:800">${qk<0?'Tiền còn lại (sau khi trả nhân viên)':'Tổng tiền mặt'}</div><div class="v big-num">${fmt(tong)}</div></div>
   </div></div>
-  <button class="btn btn-primary" onclick="modalNapQuyChi()">🧑‍💼 ${qk<0?'Trả lại / nạp cho người giữ':'Nạp / trả quỹ chi người giữ'}</button>`);}
+  <button class="btn btn-primary" onclick="modalNapQuyChi()">🧑‍💼 ${qk<0?'Trả lại / nạp cho nhân viên':'Nạp / trả Quỹ phụ nhân viên'}</button>`);}
 
 /* ---------- Ghi bổ sung cho ngày trước (Tổng quan → Chốt sổ) ---------- */
 function gbsToday(){const d=new Date();const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
@@ -3062,7 +3082,7 @@ function modalGhiTien(){
   h+=grp('💵 Tiền ra vào két').replace('14px','8px');
   h+=`<div class="act-grid">${B('thu','💵','Thu tiền chủ hàng','btn-sage')}${B('chi','🧵','Chi tiền xưởng')}</div>`;
   h+=`<div style="height:8px"></div><div class="act-grid">${B('rut','🏠','Rút tiền về nhà')}${B('bo','➕','Bỏ thêm tiền')}</div>`;
-  h+=`<div style="height:8px"></div><div class="act-grid"><button class="btn btn-ghost" onclick="modalNapQuyChi()">🧑‍💼 Nạp quỹ chi (người giữ)</button></div>`;
+  h+=`<div style="height:8px"></div><div class="act-grid"><button class="btn btn-ghost" onclick="modalNapQuyChi()">🧑‍💼 Nạp Quỹ phụ (nhân viên)</button></div>`;
   if(coTho){h+=grp('💰 Lương thợ');
     h+=`<div class="act-grid">${B('tra','','Trả lương')}${B('ung','','Ứng lương')}</div>`;
     h+=`<div style="height:8px"></div><div class="act-grid">${B('psth','','Phát sinh (cơm/bồi dưỡng)')}${B('khac','','Chi khác (ship…)')}</div>`;}
@@ -3493,6 +3513,10 @@ function csGroupOf(bt){
   if(/^Số dư đầu kỳ/.test(s))return {nature:q>0?'vao':'ra',gkey:'dauky',icon:'🏁',title:'Số dư đầu kỳ',amount:q,sub:s.replace(/^Số dư đầu kỳ — /,'')};
   /* còn lại: chi phí chung phân bổ, kết chuyển giá vốn, đóng/hủy đơn, khóa kỳ, xóa nợ... = nội bộ, bỏ */
   return null;}
+/* Nhãn quỹ cho từng dòng tiền vào/ra trong nhật ký — để đối chiếu 2 túi (quỹ chính vs quỹ phụ) */
+function csQuyTag(bt){let chi=0,chinh=0;for(const d of bt.dong){if(d.tk!==TK.QUY)continue;const v=(d.chieu==='NO'?d.soTien:-d.soTien);if(d.quy==='chi')chi+=v;else chinh+=v;}
+  if(chi&&chinh)return 'ca';if(chi)return 'chi';if(chinh)return 'chinh';return '';}
+function csQuyLabel(bt){const t=csQuyTag(bt);return t==='chi'?'🧑‍💼 Quỹ phụ':t==='chinh'?'💼 Quỹ chính':t==='ca'?'💼+🧑‍💼 cả hai quỹ':'';}
 /* Gom theo ngày → nhóm → dòng, kèm tổng theo bản chất */
 function csRows(){
   const days={},order=[];const tot={cong:0,dt:0,vao:0,ra:0};
@@ -3507,7 +3531,8 @@ function csRows(){
     const G=D.groups[g.gkey];G.total+=amt;
     let _sk=null;if(/^Phát sinh thợ/.test(bt.suKien))_sk='ps';else if(/^Doanh thu \(lịch sử\)/.test(bt.suKien))_sk='dtls';
     else if(/^Chủ bỏ thêm|^Chủ rút tiền|^Trả lương|^Ứng lương|^Chi tiền|^Chi khác|^Chủ hàng trả tiền/.test(bt.suKien))_sk='khoan';
-    G.items.push({sub:g.sub,amount:amt,t:bt.thoiDiem,btId:bt.id,suaKind:_sk});
+    let _subx=g.sub;if(g.nature==='vao'||g.nature==='ra'){const _ql=csQuyLabel(bt);if(_ql)_subx=(_subx?_subx+' · ':'')+_ql;}
+    G.items.push({sub:_subx,amount:amt,t:bt.thoiDiem,btId:bt.id,suaKind:_sk});
     if(g.nature==='cong'){D.tot.cong+=amt;tot.cong+=amt;}
     else if(g.nature==='dt'){D.tot.dt+=amt;tot.dt+=amt;}
     else if(g.nature==='vao'){D.tot.vao+=amt;tot.vao+=amt;}
@@ -4824,8 +4849,8 @@ function bcCauNoi(){
       <div class="bv num ${r[2]==='+'?'money-pos':'money-neg'}">${fmt(r[3])}</div></div><div class="bridge-explain">${r[4]}</div>`;});
   h+=`<div class="bridge-row foot"><div class="bl">= Tiền thật trong két</div><div class="bv num">${fmt(quy)}</div></div>`;
   {const _qc=quyChinh(),_qk=quyChi();
-   h+=`<div class="bridge-row" style="border-top:1px dashed var(--line-2);cursor:pointer" onclick="modalQuyChiTiet('chinh')"><div class="bridge-sign"></div><div class="bl">↳ 💼 Quỹ 1 · bạn giữ ›</div><div class="bv num">${fmt(_qc)}</div></div>`;
-   h+=`<div class="bridge-row" style="cursor:pointer" onclick="modalQuyChiTiet('chi')"><div class="bridge-sign"></div><div class="bl">↳ 🧑‍💼 Quỹ 2 · người giữ${_qk<0?' (đang nợ)':''} ›</div><div class="bv num ${_qk<0?'money-neg':''}">${fmt(_qk)}</div></div>`;}
+   h+=`<div class="bridge-row" style="border-top:1px dashed var(--line-2);cursor:pointer" onclick="modalQuyChiTiet('chinh')"><div class="bridge-sign"></div><div class="bl">↳ 💼 Quỹ chính · chủ xưởng ›</div><div class="bv num">${fmt(_qc)}</div></div>`;
+   h+=`<div class="bridge-row" style="cursor:pointer" onclick="modalQuyChiTiet('chi')"><div class="bridge-sign"></div><div class="bl">↳ 🧑‍💼 Quỹ phụ · nhân viên${_qk<0?' (đang nợ)':''} ›</div><div class="bv num ${_qk<0?'money-neg':''}">${fmt(_qk)}</div></div>`;}
   h+=`</div>`;
   h+=`<div class="hint" style="text-align:center;margin-top:4px">Sổ giấy chỉ nói được một trong hai con số — và thường nói sai.</div>`;
   return h;
@@ -5316,7 +5341,7 @@ function navBack(){
 }
 function navCloseAll(){_nav=[];_hardClose();}   /* đóng hết sheet, về màn nền (dùng sau khi ghi xong) */
 function _hardClose(){el('scrim').classList.remove('on');_nvBackTo=null;_sheetClose=null;}
-const _NAV_FRAMES=['modalDon','modalTaoDon','modalGiaoViec','modalNhanVe','modalChamGio','modalChiPhiDon','modalGiaoXe','modalTienDen','modalXinCham','modalChamVe','modalThao','modalGiaoTP','modalChuHang','modalThuChuHang','modalThuTien','modalSuaKhoan','modalNoXau','modalChiPhi','modalRutVon','modalBoVon','modalGhiBoSung','modalGhiTien','modalSoCong','modalChotLuong','modalSoCongTho','modalChotSo','modalThoChiTiet','modalTraLuong','modalUng','modalPhatSinhTho','modalSuaPhatSinh','modalSuaDonLS','modalSuaDon','modalOp','modalChonChuThu','modalCaiDat','modalPhucHoi','modalThemChu','modalSuaChu','modalThemTho','modalSuaTho','modalThemMau','modalSuaMau','modalKhoMau','modalThemMauSan','modalSuaMauSan','modalDKMauSan','modalNeoMauSan','modalDauKy','moNhanNhanh','doDongDon','confirmDongDon','confirmHuyDon','confirmTraLai','confirmTraHet','confirmXoaDon','confirmXoaHanDon','kmChot','mcOpen','exportModal','hoiLanTruyen','moKetNoiDamMay','openSoKeToan','askDao','ltDetail','modalSoRieng','modalLaiDon','modalLaiLichSu','modalChiPhiXong','modalThemMucCoDinh','modalLo','modalLaiLo','modalChiPhiLo','modalNgayNghiBao','modalDoiMocBao'];
+const _NAV_FRAMES=['modalDon','modalTaoDon','modalGiaoViec','modalNhanVe','modalChamGio','modalChiPhiDon','modalGiaoXe','modalTienDen','modalXinCham','modalChamVe','modalThao','modalGiaoTP','modalChuHang','modalThuChuHang','modalThuTien','modalSuaKhoan','modalNoXau','modalChiPhi','modalRutVon','modalBoVon','modalGhiBoSung','modalGhiTien','modalSoCong','modalChotLuong','modalSoCongTho','modalChotSo','modalThoChiTiet','modalTraLuong','modalUng','modalPhatSinhTho','modalSuaPhatSinh','modalSuaDonLS','modalSuaDon','modalOp','modalChonChuThu','modalCaiDat','modalPhucHoi','modalThemChu','modalSuaChu','modalThemTho','modalSuaTho','modalThemMau','modalSuaMau','modalKhoMau','modalThemMauSan','modalSuaMauSan','modalDKMauSan','modalNeoMauSan','modalDauKy','moNhanNhanh','doDongDon','confirmDongDon','confirmHuyDon','confirmTraLai','confirmTraHet','confirmXoaDon','confirmXoaHanDon','kmChot','mcOpen','exportModal','hoiLanTruyen','moKetNoiDamMay','openSoKeToan','askDao','ltDetail','modalSoRieng','modalLaiDon','modalLaiLichSu','modalChiPhiXong','modalThemMucCoDinh','modalLo','modalLaiLo','modalChiPhiLo','modalNgayNghiBao','modalDoiMocBao','modalKet','modalNapQuyChi','modalTraQuyChi','modalQuyChiTiet','nvXong'];
 function _installNavFrames(){_NAV_FRAMES.forEach(name=>{const orig=window[name];
   if(typeof orig!=='function'||orig._wrapped)return;
   const w=function(){const a=Array.prototype.slice.call(arguments);_frame(name,a);return orig.apply(this,a);};
@@ -5390,8 +5415,8 @@ document.addEventListener('pointerdown',function(e){
 /* Đồng nhất "mọi đơn thuộc một lô": đơn cũ chưa có maLo → gán maLo = ma (lô 1 mẫu). Idempotent. */
 function migrateQuyChi(){if(!DB||!DB.butToan)return false;let ch=false;
   // Gắn nhãn quỹ theo TÀI KHOẢN ĐỐI ỨNG (chuẩn hơn tên sự kiện, xử đúng cả bút toán đảo):
-  //  • đối ứng chi phí/lương (RO_CHUNG, GIA_VON, WIP, PHAI_TRA_THO) → Quỹ 2 (nhãn 'chi')
-  //  • đối ứng VON (bỏ vốn/rút) hoặc PHAI_THU (thu chủ hàng) → Quỹ 1 (không nhãn)
+  //  • đối ứng chi phí/lương (RO_CHUNG, GIA_VON, WIP, PHAI_TRA_THO) → Quỹ phụ (nhãn 'chi')
+  //  • đối ứng VON (bỏ vốn/rút) hoặc PHAI_THU (thu chủ hàng) → Quỹ chính (không nhãn)
   // CHỈ đụng dòng CHƯA có nhãn → không đè lựa chọn quỹ thủ công của người dùng. Idempotent.
   const Q2SET={RO_CHUNG:1,GIA_VON:1,WIP:1,PHAI_TRA_THO:1};
   for(const bt of DB.butToan){
@@ -5399,7 +5424,7 @@ function migrateQuyChi(){if(!DB||!DB.butToan)return false;let ch=false;
     const hasVon=bt.dong.some(d=>d.tk===TK.VON);
     for(const d of bt.dong){if(d.tk!==TK.QUY)continue;
       if(isExpense){if(d.quy===undefined){d.quy='chi';ch=true;}}
-      else if(hasVon){if(d.quy==='chi'){delete d.quy;ch=true;}}   // bỏ vốn/rút không bao giờ ở Quỹ 2
+      // Bỏ vốn/rút: mặc định Quỹ chính (không nhãn); nếu người dùng CHỦ ĐÍCH bỏ thẳng Quỹ phụ (quy:'chi') thì GIỮ nguyên.
     }
   }
   return ch;}
