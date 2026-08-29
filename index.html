@@ -365,7 +365,7 @@ nav.bottom{box-shadow:0 -10px 24px -20px rgba(20,30,45,.5)}
       <div style="display:flex;align-items:center;gap:10px">
         <button class="hdr-gear" id="hdrUndo" onclick="hoanTacGanNhat()" aria-label="Hoàn tác" style="display:none">↩</button>
         <button class="hdr-gear" onclick="modalCaiDat()" aria-label="Cài đặt">⚙</button>
-        <div class="pill-cash">
+        <div class="pill-cash" onclick="modalKet()" style="cursor:pointer">
           <small>Tiền trong két</small>
           <b class="num" id="hCash">0 đ</b>
         </div>
@@ -701,24 +701,24 @@ function chamGio({donId,thoId,gio}){beginOp();
   hapThuChung(donId,tien);Store.save();
 }
 /* chi phí trực tiếp gắn đơn (ship nhận/giao — event #2/#13) */
-function chiPhiDon({donId,soTien,dienGiai,ngay}){beginOp();
+function chiPhiDon({donId,soTien,dienGiai,ngay,quy='chi'}){beginOp();
   ghi('Chi phí đơn: '+dienGiai,[
-    {tk:TK.WIP,chieu:'NO',soTien,donId,loai:'BAC_LO'},{tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);
+    {tk:TK.WIP,chieu:'NO',soTien,donId,loai:'BAC_LO'},{tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);
   Store.save();
 }
 /* Chi phí phát sinh cho đơn ĐÃ XONG: WIP đã kết chuyển rồi nên ghi thẳng vào GIÁ VỐN đơn
    (GIA_VON ↔ QUY, không đụng WIP) — đúng như tiền đền trên đơn đã xong, và khớp bóc tách. */
-function chiPhiDonXong({donId,soTien,dienGiai,ngay}){beginOp();
+function chiPhiDonXong({donId,soTien,dienGiai,ngay,quy='chi'}){beginOp();
   ghi('Chi phí phát sinh: '+(dienGiai||'đơn đã xong'),[
     {tk:TK.GIA_VON,chieu:'NO',soTien,donId,loai:'CHENH_LECH',psXong:true,dienGiai:(dienGiai||'')},
-    {tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);
+    {tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);
   Store.save();
 }
 /* CHI PHÍ LÔ — ship/phụ liệu tính cho CẢ LÔ, ghi 1 lần rồi tự chia vào từng mẫu
    theo tiền công (không có công thì theo số cái). Mỗi mẫu ngấm phần của nó nên
    lãi lô = Σ lãi mẫu, và đối chiếu Chốt sổ/Lãi tạm vẫn khớp (mỗi phần là chi phí đơn).
    Đơn chưa xong → WIP(bậc lô); đơn đã xong → thẳng GIÁ VỐN. Cả cụm là 1 nhóm hoàn tác. */
-function chiPhiLo({maLo,soTien,dienGiai,ngay}){
+function chiPhiLo({maLo,soTien,dienGiai,ngay,quy='chi'}){
   soTien=Math.round(+soTien||0);if(soTien<=0)throw new Error('Nhập số tiền chi phí lô.');
   const dons=donCuaLo(maLo).filter(d=>d.trangThai!=='DA_HUY');
   if(!dons.length)throw new Error('Lô không có đơn để tính chi phí.');
@@ -736,11 +736,11 @@ function chiPhiLo({maLo,soTien,dienGiai,ngay}){
     if(d.trangThai==='DA_GIAO_DU')
       ghi('Chi phí phát sinh: [Lô '+maLo+'] '+dg,[
         {tk:TK.GIA_VON,chieu:'NO',soTien:s,donId:d.id,loai:'CHENH_LECH',psXong:true,dienGiai:dg},
-        {tk:TK.QUY,chieu:'CO',soTien:s}],ngay?{thoiDiem:ngay}:null);
+        {tk:TK.QUY,chieu:'CO',soTien:s,quy}],ngay?{thoiDiem:ngay}:null);
     else
       ghi('Chi phí đơn: [Lô '+maLo+'] '+dg,[
         {tk:TK.WIP,chieu:'NO',soTien:s,donId:d.id,loai:'BAC_LO'},
-        {tk:TK.QUY,chieu:'CO',soTien:s}],ngay?{thoiDiem:ngay}:null);
+        {tk:TK.QUY,chieu:'CO',soTien:s,quy}],ngay?{thoiDiem:ngay}:null);
   });
   Store.save();
 }
@@ -773,11 +773,11 @@ function xoaGiaoCong(id){DB.giaoCong=DB.giaoCong||[];
   DB.giaoCong=DB.giaoCong.filter(x=>x.id!==id);Store.save();render();toast('Đã gỡ chuyến giao.');
 }
 /* tiền đền hàng hư (event #12) */
-function tienDen({donId,soTien,ngay}){beginOp();
+function tienDen({donId,soTien,ngay,quy='chi'}){beginOp();
   const don=getDon(donId);const dong=don.trangThai==='DA_GIAO_DU';
   const target=dong?{tk:TK.GIA_VON,loai:'CHENH_LECH'}:{tk:TK.WIP,loai:'BAC_LO'};
   ghi('Tiền đền hàng hư',[
-    Object.assign({chieu:'NO',soTien,donId},target),{tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);
+    Object.assign({chieu:'NO',soTien,donId},target),{tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);
   Store.save();
 }
 /* cắt châm 11a — xin (không bút toán) */
@@ -791,7 +791,7 @@ function chamVeAction({donId,chamId,veSizes,shipCost}){beginOp();
   const don=getDon(donId);const c=don.chamList.find(x=>x.id===chamId);
   c.veRoi=true;c.veSizes={...veSizes};c.ngayVe=now();
   if(shipCost>0) ghi('Ship cắt châm về',[
-    {tk:TK.WIP,chieu:'NO',soTien:shipCost,donId,loai:'BAC_LO'},{tk:TK.QUY,chieu:'CO',soTien:shipCost}]);
+    {tk:TK.WIP,chieu:'NO',soTien:shipCost,donId,loai:'BAC_LO'},{tk:TK.QUY,chieu:'CO',soTien:shipCost,quy:'chi'}]);
   Store.save();
 }
 /* tháo (event 23–24) — rẽ nhánh theo ai chịu (QĐ-39) */
@@ -886,13 +886,13 @@ function thuTien({chuHangId,soTien,uuTien,ngay}){beginOp();
   if(du>0) lines.push({tk:TK.PHAI_THU,chieu:'CO',soTien:du,chuHangId,phieuGiaoId:'UNG-'+chuHangId});
   ghi('Chủ hàng trả tiền',lines,ngay?{thoiDiem:ngay}:null);Store.save();return {alloc,du};
 }
-function traLuong({thoId,soTien,ngay}){beginOp();
+function traLuong({thoId,soTien,ngay,quy='chi'}){beginOp();
   ghi('Trả lương thợ',[
-    {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien,thoId},{tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
+    {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien,thoId},{tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
-function ungLuong({thoId,soTien,ngay}){beginOp();
+function ungLuong({thoId,soTien,ngay,quy='chi'}){beginOp();
   ghi('Ứng lương thợ',[
-    {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien,thoId},{tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
+    {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien,thoId},{tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
 /* chủ rút tiền về nhà / bỏ thêm tiền vào xưởng — chạm VỐN, KHÔNG phải chi phí */
 function rutVon({soTien,dienGiai,ngay}){beginOp();
@@ -903,15 +903,32 @@ function boVon({soTien,dienGiai,ngay}){beginOp();
   ghi('Chủ bỏ thêm tiền vào xưởng'+(dienGiai?': '+dienGiai:''),[
     {tk:TK.QUY,chieu:'NO',soTien},{tk:TK.VON,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
-function chiPhiXuong({soTien,dienGiai,ngay}){beginOp();
+/* ===== HAI QUỸ (cùng một két, hai túi) — chỉ là lát cắt của TK.QUY, KHÔNG phải tài khoản mới =====
+   • Quỹ chính  = tiền bạn trực tiếp giữ (chủ hàng trả/ứng, vốn, trừ lương/rút) → dòng QUY KHÔNG nhãn.
+   • Quỹ chi    = tiền đã đưa người giữ để chi hộ → dòng QUY nhãn quy:'chi'.
+   Tổng hai quỹ = bal(TK.QUY).net (không đổi) ⇒ cầu nối/chốt sổ/header giữ nguyên, không thể vỡ. */
+function quyChi(){return bal(TK.QUY,d=>d.quy==='chi').net;}     // người giữ còn cầm bao nhiêu = nạp − đã chi
+function quyChinh(){return bal(TK.QUY,d=>d.quy!=='chi').net;}   // bạn còn trực tiếp giữ bao nhiêu
+/* chuyển tiền từ quỹ chính → quỹ chi (nạp cho người giữ). Đổi túi, KHÔNG phải chi phí,
+   tổng két không đổi (QUY +s ở nhãn chi, −s ở nhãn chính → net 0), không hiện ở chốt sổ. */
+function chuyenQuy({soTien,dienGiai,ngay}){beginOp();
+  ghi('Nạp quỹ chi cho người giữ'+(dienGiai?': '+dienGiai:''),[
+    {tk:TK.QUY,chieu:'NO',soTien,quy:'chi'},{tk:TK.QUY,chieu:'CO',soTien,quy:'chinh'}],ngay?{thoiDiem:ngay}:null);Store.save();
+}
+/* người giữ trả tiền thừa về cho bạn (quỹ chi → quỹ chính) */
+function traQuyChi({soTien,dienGiai,ngay}){beginOp();
+  ghi('Người giữ trả lại tiền thừa'+(dienGiai?': '+dienGiai:''),[
+    {tk:TK.QUY,chieu:'NO',soTien,quy:'chinh'},{tk:TK.QUY,chieu:'CO',soTien,quy:'chi'}],ngay?{thoiDiem:ngay}:null);Store.save();
+}
+function chiPhiXuong({soTien,dienGiai,ngay,quy='chi'}){beginOp();
   ghi('Chi tiền: '+dienGiai,[
-    {tk:TK.RO_CHUNG,chieu:'NO',soTien},{tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
+    {tk:TK.RO_CHUNG,chieu:'NO',soTien},{tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
 /* chi khác KHÔNG thuộc đơn nào (ship gom nhiều đơn, đền lặt vặt…) — chi phí gián tiếp,
    ngấm giá vốn như chi phí xưởng nhưng gắn nhãn riêng "Chi khác" để đối chiếu Lãi tạm ↔ Chốt sổ */
-function chiKhac({soTien,dienGiai,ngay,chuHangId}){beginOp();
+function chiKhac({soTien,dienGiai,ngay,chuHangId,quy='chi'}){beginOp();
   ghi('Chi khác: '+(dienGiai||'ship/đền'),[
-    {tk:TK.RO_CHUNG,chieu:'NO',soTien,chuHangId:chuHangId||null},{tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
+    {tk:TK.RO_CHUNG,chieu:'NO',soTien,chuHangId:chuHangId||null},{tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
 /* ===========================================================
    SỔ RIÊNG CỦA TÔI — thu/chi cá nhân của chủ.
@@ -947,11 +964,11 @@ function srTong(list){let thu=0,chi=0;(list||srList()).forEach(r=>{if(r.loai==='
    Tự ngấm vào giá vốn các đơn theo tiền công như "Chi tiền xưởng",
    nhưng có nhãn PHAT_SINH_THO + thoId để cộng riêng theo từng thợ. */
 const PS_KIND={com:'Tiền cơm',hotro:'Tiền hỗ trợ',khac:'Khác'};
-function phatSinhTho({thoId,soTien,kind,dienGiai,ngay}){beginOp();
+function phatSinhTho({thoId,soTien,kind,dienGiai,ngay,quy='chi'}){beginOp();
   const nhan=PS_KIND[kind]||'Khác';
   ghi('Phát sinh thợ · '+nhan+(dienGiai?' — '+dienGiai:''),[
     {tk:TK.RO_CHUNG,chieu:'NO',soTien,thoId,loai:'PHAT_SINH_THO',kind,ghiChu:dienGiai||''},
-    {tk:TK.QUY,chieu:'CO',soTien}],ngay?{thoiDiem:ngay}:null);Store.save();
+    {tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
 function psTong(thoId){return bal(TK.RO_CHUNG,d=>d.loai==='PHAT_SINH_THO'&&d.thoId===thoId).net;}
 function psList(thoId){const out=[];
@@ -967,10 +984,11 @@ function _psGoOld(bt){ // xóa hẳn nếu mới nhập, ngược lại tạo b�
   else{beginOp();const dong=bt.dong.map(d=>Object.assign({},d,{chieu:d.chieu==='NO'?'CO':'NO'}));
     DB.butToan.push({id:uid(),suKien:'Sửa: '+bt.suKien,thoiDiem:now(),op:curOp(),dong,dao_cua:bt.id});bt.daDao=true;}
 }
-function suaPhatSinh({btId,soTien,kind,dienGiai}){
+function suaPhatSinh({btId,soTien,kind,dienGiai,quy}){
   const bt=DB.butToan.find(b=>b.id===btId);if(!bt)throw new Error('Không tìm thấy khoản.');
   _psGuardKhoa(bt);const l=bt.dong.find(d=>d.tk===TK.RO_CHUNG)||{};const thoId=l.thoId,ng=bt.thoiDiem;
-  _psGoOld(bt);phatSinhTho({thoId,soTien,kind,dienGiai,ngay:ng});
+  if(quy!=='chi'&&quy!=='chinh')quy=((bt.dong.find(d=>d.tk===TK.QUY)||{}).quy==='chi')?'chi':'chinh';
+  _psGoOld(bt);phatSinhTho({thoId,soTien,kind,dienGiai,ngay:ng,quy});
 }
 function xoaPhatSinh(btId){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)return;_psGuardKhoa(bt);_psGoOld(bt);Store.save();}
 /* ---- Nhập lại lịch sử cũ (đơn không có trong app): ghi thẳng, KHÔNG qua WIP ----
@@ -1447,8 +1465,10 @@ function laiTheoThang(keys){const m={};keys.forEach(k=>m[k]=0);
       else if(d.tk===TK.GIA_VON)m[k]-=(d.chieu==='NO'?d.soTien:-d.soTien);
       else if(d.tk===TK.LO_KHAC)m[k]-=(d.chieu==='NO'?d.soTien:-d.soTien);});});
   return keys.map(k=>m[k]);}
+/* nạp/trả quỹ chi = chuyển tiền giữa 2 túi của bạn (mọi dòng đều QUY) → KHÔNG phải dòng tiền vào/ra */
+function laChuyenTui(bt){return bt.dong.length>0&&bt.dong.every(d=>d.tk===TK.QUY);}
 function dongTienTheoThang(keys){const vao={},ra={};keys.forEach(k=>{vao[k]=0;ra[k]=0;});
-  DB.butToan.forEach(bt=>{const k=ymKey(bt.thoiDiem);if(!(k in vao))return;
+  DB.butToan.forEach(bt=>{if(laChuyenTui(bt))return;const k=ymKey(bt.thoiDiem);if(!(k in vao))return;
     bt.dong.forEach(d=>{if(d.tk!==TK.QUY)return;if(d.chieu==='NO')vao[k]+=d.soTien;else ra[k]+=d.soTien;});});
   return {vao:keys.map(k=>vao[k]),ra:keys.map(k=>ra[k])};}
 /* ---- biểu đồ theo NGÀY (thêm; bản theo tháng ở trên giữ nguyên) ---- */
@@ -1466,7 +1486,7 @@ function laiTheo(keys,keyFn){keyFn=keyFn||ymKey;const m={};keys.forEach(k=>m[k]=
       else if(d.tk===TK.LO_KHAC)m[k]-=(d.chieu==='NO'?d.soTien:-d.soTien);});});
   return keys.map(k=>m[k]);}
 function dongTienTheo(keys,keyFn){keyFn=keyFn||ymKey;const vao={},ra={};keys.forEach(k=>{vao[k]=0;ra[k]=0;});
-  DB.butToan.forEach(bt=>{const k=keyFn(bt.thoiDiem);if(!(k in vao))return;
+  DB.butToan.forEach(bt=>{if(laChuyenTui(bt))return;const k=keyFn(bt.thoiDiem);if(!(k in vao))return;
     bt.dong.forEach(d=>{if(d.tk!==TK.QUY)return;if(d.chieu==='NO')vao[k]+=d.soTien;else ra[k]+=d.soTien;});});
   return {vao:keys.map(k=>vao[k]),ra:keys.map(k=>ra[k])};}
 /* groups: mảng theo cột, mỗi cột là mảng {v,color}; showVal: ghi số trên đầu cột (1 cột 1 cây) */
@@ -1638,6 +1658,13 @@ function homeBody(){
     <button class="btn btn-sage btn-sm" onclick="modalChonChuThu()">💵 Thu tiền</button>
     <button class="btn btn-ghost btn-sm" onclick="modalChiPhi()">🧵 Chi tiền xưởng</button>
     <button class="btn btn-ghost btn-sm wide" onclick="tqTab='nhatky';render()">🗒️ Lịch sử nhập — xem & sửa phát sinh</button></div>`;
+  // Hai quỹ: tiền bạn giữ vs tiền đưa người giữ chi hộ (cùng một tổng)
+  {const qc=quyChinh(),qk=quyChi(),tong=qc+qk;
+   h+=`<div class="card" style="margin:8px 0 2px"><div class="card-pad">
+     <div class="kv"><div class="k">💼 Quỹ bạn giữ</div><div class="v">${fmt(qc)}</div></div>
+     <div class="kv"><div class="k">🧑‍💼 ${qk<0?'<span style=\"color:var(--thread)\">Nợ người giữ</span>':'Quỹ người giữ (còn)'}</div><div class="v ${qk<0?'money-neg':''}">${fmt(qk<0?-qk:qk)}</div></div>
+     <div class="kv" style="border-top:1px solid var(--line);margin-top:4px;padding-top:8px"><div class="k" style="font-weight:800">Tổng tiền mặt</div><div class="v big-num">${fmt(tong)}</div></div>
+     <div style="margin-top:10px"><button class="btn btn-ghost btn-sm wide" onclick="modalNapQuyChi()">🧑‍💼 Nạp / trả quỹ chi người giữ</button></div></div></div>`;}
 
   // Việc nên làm — hàng bấm mở thẳng modal sẵn có
   const jobs=[];
@@ -2884,11 +2911,13 @@ function modalChiPhi(){openSheet('Ghi chi tiền xưởng',`
   <div class="field"><label>Chi cho việc gì</label><input id="cp_dg" placeholder="VD: Tiền điện, kim chỉ chung"></div>
   <div class="field"><label>Số tiền</label><input type="text" inputmode="numeric" class="sep" id="cp_sl" value="0" onfocus="this.select()"></div>
   <div class="hint" style="margin-bottom:10px">Chi phí chung tự chia vào các đơn theo tiền công.</div>
+  ${quySeg('cp')}
   <div class="warn-box" style="margin-bottom:14px">Tiền rút cho <b>việc nhà</b> không phải chi phí của xưởng — ghi ở đây sẽ làm lãi sai.
     <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="modalRutVon()">🏠 Chuyển sang ghi Rút tiền về nhà</button></div></div>
   <button class="btn btn-primary" onclick="submitChiPhi()">Ghi chi tiền</button>`);}
 function submitChiPhi(){try{const s=numVal('cp_sl'),dg=el('cp_dg').value||'chi phí xưởng';
-  if(s<=0)return toast('Nhập số tiền.',true);chiPhiXuong({soTien:s,dienGiai:dg});closeSheet();render();toastUndo('Đã ghi chi tiền.');}catch(e){toast(e.message,true)}}
+  if(s<=0)return toast('Nhập số tiền.',true);chiPhiXuong({soTien:s,dienGiai:dg,quy:readQuy('cp')});
+  closeSheet();render();toastUndo('Đã ghi chi tiền.');}catch(e){toast(e.message,true)}}
 function modalRutVon(){const quy=bal(TK.QUY).net;openSheet('Rút tiền về nhà',`
   <div class="warn-box">Tiền rút cho việc nhà <b>không phải chi phí</b> — nó không làm giảm lãi, chỉ giảm phần vốn của bạn trong xưởng. Xưởng lãi bao nhiêu và bạn rút bao nhiêu là hai chuyện độc lập.</div>
   <div class="field"><label>Số tiền rút (két đang có ${fmt(quy)})</label><input type="text" inputmode="numeric" class="sep" id="rv_sl" value="0" onfocus="this.select()"></div>
@@ -2897,13 +2926,74 @@ function modalRutVon(){const quy=bal(TK.QUY).net;openSheet('Rút tiền về nh�
 function submitRutVon(){try{const s=numVal('rv_sl');if(s<=0)return toast('Nhập số tiền.',true);
   rutVon({soTien:s,dienGiai:el('rv_dg').value.trim()});closeSheet();render();toastUndo('Đã ghi rút tiền về nhà.');}catch(e){toast(e.message,true)}}
 function modalBoVon(){openSheet('Bỏ thêm tiền vào xưởng',`
-  <div class="hint" style="margin-bottom:14px">Tiền túi bạn đưa vào két để xưởng có vốn xoay. Đây không phải doanh thu — nó cộng vào phần vốn của bạn.</div>
+  <div class="hint" style="margin-bottom:14px">Tiền túi bạn tự bỏ vào xưởng làm vốn xoay → vào <b>Quỹ 1 (bạn giữ)</b>. Không phải doanh thu, tính là <b>vốn</b> của bạn. Muốn đưa cho người giữ chi thì sau đó bấm "Nạp quỹ chi".</div>
   ${mucChips('bo','bv_dg','bv_sl')}
   <div class="field"><label>Số tiền bỏ vào</label><input type="text" inputmode="numeric" class="sep" id="bv_sl" value="0" onfocus="this.select()"></div>
   <div class="field"><label>Ghi chú (không bắt buộc)</label><input id="bv_dg" placeholder="VD: Vay người nhà, tiền tiết kiệm"></div>
   <button class="btn btn-primary" onclick="submitBoVon()">Ghi bỏ vốn</button>`);}
 function submitBoVon(){try{const s=numVal('bv_sl');if(s<=0)return toast('Nhập số tiền.',true);
   boVon({soTien:s,dienGiai:el('bv_dg').value.trim()});closeSheet();render();toastUndo('Đã ghi bỏ thêm tiền vào xưởng.');}catch(e){toast(e.message,true)}}
+function modalNapQuyChi(){const c=quyChinh(),k=quyChi();openSheet('Nạp quỹ chi cho người giữ',`
+  <div class="hint" style="margin-bottom:12px">Chuyển tiền từ <b>quỹ bạn giữ</b> sang <b>quỹ người giữ</b> để họ chi hộ (điện, phụ liệu, ship…). Đây <b>không phải chi phí</b> — chỉ đổi túi, tổng tiền không đổi.</div>
+  <div class="card" style="margin-bottom:14px"><div class="card-pad">
+    <div class="kv"><div class="k">Quỹ bạn giữ (rút ra)</div><div class="v">${fmt(c)}</div></div>
+    <div class="kv"><div class="k">Quỹ người giữ đang còn</div><div class="v">${fmt(k)}</div></div></div></div>
+  <div class="field"><label>Số tiền nạp</label><input type="text" inputmode="numeric" class="sep" id="nq_sl" value="0" onfocus="this.select()"></div>
+  <div class="field"><label>Ghi chú (không bắt buộc)</label><input id="nq_dg" placeholder="VD: Đổ quỹ chi đầu tuần"></div>
+  <button class="btn btn-primary" onclick="submitNapQuyChi()">Nạp quỹ chi</button>
+  <div style="height:8px"></div>
+  <button class="btn btn-ghost" onclick="modalTraQuyChi()">↩︎ Người giữ trả lại tiền thừa</button>`);}
+function submitNapQuyChi(){try{const s=numVal('nq_sl');if(s<=0)return toast('Nhập số tiền.',true);
+  chuyenQuy({soTien:s,dienGiai:el('nq_dg').value.trim()});closeSheet();render();toastUndo('Đã nạp quỹ chi cho người giữ.');}catch(e){toast(e.message,true)}}
+function modalTraQuyChi(){const k=quyChi();openSheet('Người giữ trả lại tiền thừa',`
+  <div class="hint" style="margin-bottom:12px">Người giữ trả tiền còn dư về cho bạn — tiền chạy ngược từ <b>quỹ người giữ</b> về <b>quỹ bạn giữ</b>. Quỹ người giữ đang còn ${fmt(k)}.</div>
+  <div class="field"><label>Số tiền trả lại</label><input type="text" inputmode="numeric" class="sep" id="tq_sl" value="0" onfocus="this.select()"></div>
+  <div class="field"><label>Ghi chú (không bắt buộc)</label><input id="tq_dg" placeholder="VD: Cuối tháng trả dư"></div>
+  <button class="btn btn-primary" onclick="submitTraQuyChi()">Ghi trả lại</button>`);}
+function submitTraQuyChi(){try{const s=numVal('tq_sl');if(s<=0)return toast('Nhập số tiền.',true);
+  traQuyChi({soTien:s,dienGiai:el('tq_dg').value.trim()});closeSheet();render();toastUndo('Đã ghi người giữ trả lại tiền thừa.');}catch(e){toast(e.message,true)}}
+function suaKhoanAuto(btId){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)return;
+  if(bt.dong.some(d=>d.loai==='PHAT_SINH_THO'))return modalSuaPhatSinh(btId);
+  modalSuaKhoan(btId);}
+function quyRows(which){const pred=which==='chi'?(d=>d.tk===TK.QUY&&d.quy==='chi'):(d=>d.tk===TK.QUY&&d.quy!=='chi');
+  const arr=DB.butToan.slice().sort((a,b)=>a.thoiDiem-b.thoiDiem);let run=0;const rows=[];
+  for(const bt of arr){let s=0;for(const d of bt.dong)if(pred(d))s+=(d.chieu==='NO'?d.soTien:-d.soTien);if(!s)continue;run+=s;rows.push({bt,s,run});}
+  return rows;}
+function modalQuyChiTiet(which){const rows=quyRows(which).reverse();
+  const title=which==='chi'?'Quỹ người giữ — chi tiết':'Quỹ bạn giữ — chi tiết';
+  const sd=which==='chi'?quyChi():quyChinh();
+  let h=`<div class="hint" style="margin-bottom:10px">Số dư hiện tại: <b>${fmt(sd)}</b>. Xếp mới nhất trên cùng; dòng nhỏ bên phải là số dư sau mỗi khoản — dùng để dò ngược.</div>`;
+  if(!rows.length){h+=`<div class="divider-note" style="padding:14px">Chưa có khoản nào ở quỹ này.</div>`;}
+  else{h+=`<div class="card"><div class="card-pad" style="padding:2px 12px">`+rows.map(r=>{
+    const ng=new Date(r.bt.thoiDiem).toLocaleDateString('vi-VN');const pos=r.s>=0;
+    return `<div class="kv" onclick="suaKhoanAuto('${r.bt.id}')" style="cursor:pointer;align-items:flex-start">
+      <div class="k" style="min-width:0;flex:1"><span style="margin-right:6px">${opIcon([r.bt])}</span>${friendlyOp([r.bt])}<div style="font-size:11px;color:var(--ink-2);margin-top:1px">${ng}</div></div>
+      <div style="text-align:right;white-space:nowrap"><div class="${pos?'money-pos':'money-neg'}" style="font-weight:700">${pos?'+':'−'}${fmt(Math.abs(r.s))}</div><div style="font-size:11px;color:var(--ink-2);margin-top:1px">${fmt(r.run)}</div></div></div>`;
+  }).join('')+`</div></div>`;}
+  openSheet(title,h);}
+/* Nút chọn quỹ trả cho một khoản chi — mặc định Quỹ 2 (người giữ). id để đọc lại lúc submit. */
+function quySeg(id,val){val=val||'chi';return `<div class="field"><label>Trả từ quỹ nào?</label>
+  <div style="display:flex;gap:8px" id="${id}_seg" data-q="${val}">
+    <button type="button" class="chip${val==='chi'?' sel':''}" style="flex:1" onclick="pickQuy('${id}','chi',this)">🧑‍💼 Quỹ 2 · người giữ</button>
+    <button type="button" class="chip${val==='chinh'?' sel':''}" style="flex:1" onclick="pickQuy('${id}','chinh',this)">💼 Quỹ 1 · bạn giữ</button>
+  </div>
+  <div class="hint" style="margin-top:6px">Mặc định người giữ (Quỹ 2) trả. Bấm "Quỹ 1" nếu bạn tự bỏ tiền trả khoản này.</div></div>`;}
+function pickQuy(id,val,btn){const seg=el(id+'_seg');if(!seg)return;seg.dataset.q=val;
+  seg.querySelectorAll('.chip').forEach(b=>b.classList.remove('sel'));btn.classList.add('sel');}
+function readQuy(id){const seg=el(id+'_seg');return seg?(seg.dataset.q||'chi'):'chi';}
+function modalKet(){const qc=quyChinh(),qk=quyChi(),tong=qc+qk,no=qk<0?-qk:0;openSheet('Tiền trong két',`
+  <div class="hint" style="margin-bottom:12px">Tổng tiền mặt chia làm 2 túi để bạn dễ đối chiếu với tiền thật đang cầm.</div>
+  <div class="card"><div class="card-pad">
+    <div class="kv" onclick="modalQuyChiTiet('chinh')" style="cursor:pointer"><div class="k">💼 Quỹ bạn giữ ›</div><div class="v big-num">${fmt(qc)}</div></div>
+    <div class="hint" style="margin:-2px 0 10px">Tiền thật bạn đang cầm: chủ hàng trả/ứng + vốn, trừ nạp cho người giữ & rút về nhà.</div>
+    ${qk>=0
+      ? `<div class="kv" onclick="modalQuyChiTiet('chi')" style="cursor:pointer"><div class="k">🧑‍💼 Quỹ người giữ (còn) ›</div><div class="v big-num">${fmt(qk)}</div></div>
+         <div class="hint" style="margin:-2px 0 6px">Tiền bạn đã đưa người giữ, trừ dần mỗi khoản chi (gồm cả lương thợ).</div>`
+      : `<div class="kv" onclick="modalQuyChiTiet('chi')" style="cursor:pointer"><div class="k" style="color:var(--thread)">🧑‍💼 Bạn đang nợ người giữ ›</div><div class="v big-num money-neg">${fmt(no)}</div></div>
+         <div class="hint" style="margin:-2px 0 6px">Người giữ đã lấy tiền túi trả giúp <b>${fmt(no)}</b> (chi vượt số bạn nạp). Bấm nút dưới để trả lại họ.</div>`}
+    <div class="kv" style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px"><div class="k" style="font-weight:800">${qk<0?'Tiền còn lại (sau khi trả người giữ)':'Tổng tiền mặt'}</div><div class="v big-num">${fmt(tong)}</div></div>
+  </div></div>
+  <button class="btn btn-primary" onclick="modalNapQuyChi()">🧑‍💼 ${qk<0?'Trả lại / nạp cho người giữ':'Nạp / trả quỹ chi người giữ'}</button>`);}
 
 /* ---------- Ghi bổ sung cho ngày trước (Tổng quan → Chốt sổ) ---------- */
 function gbsToday(){const d=new Date();const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
@@ -2956,7 +3046,7 @@ function modalGhiBoSung(preset){
   <div class="field" id="gbs_dgiarow" style="display:none"><label>Đơn giá / cái</label><input type="text" inputmode="numeric" class="sep" id="gbs_dongia" value="0" onfocus="this.select()" oninput="gbsThanhTien()">
     <div class="hint" id="gbs_ttien" style="margin:6px 2px 0"></div></div>
   <div class="field" id="gbs_paidrow" style="display:none"><label style="display:flex;align-items:center;gap:9px;cursor:pointer"><input type="checkbox" id="gbs_paid" style="width:20px;height:20px"><span id="gbs_paidlbl">Đã trả tiền luôn</span></label></div>
-  <div class="field" id="gbs_ungvonrow" style="display:none"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0"><input type="checkbox" id="gbs_ungvon" style="width:20px;height:20px"><span>Bỏ thêm vốn để chi khoản này (két không tụt)</span></label><div class="hint" style="margin:6px 2px 0">Bật: ghi khoản chi <b>và</b> tự bỏ một khoản vốn bằng đúng số tiền → tiền trong két giữ nguyên. Tắt: chi thẳng từ tiền đã có sẵn trong két.</div></div>
+  <div id="gbs_ungvonrow" style="display:none">${quySeg('gbs')}</div>
   <div id="gbs_mucrow" style="display:none"></div>
   <div class="field" id="gbs_dgrow"><label>Ghi chú</label><input id="gbs_dg" placeholder="VD: Tiền điện tháng trước"></div>
   <button class="btn btn-primary" onclick="submitGhiBoSung()">Ghi vào sổ</button>`);
@@ -2972,6 +3062,7 @@ function modalGhiTien(){
   h+=grp('💵 Tiền ra vào két').replace('14px','8px');
   h+=`<div class="act-grid">${B('thu','💵','Thu tiền chủ hàng','btn-sage')}${B('chi','🧵','Chi tiền xưởng')}</div>`;
   h+=`<div style="height:8px"></div><div class="act-grid">${B('rut','🏠','Rút tiền về nhà')}${B('bo','➕','Bỏ thêm tiền')}</div>`;
+  h+=`<div style="height:8px"></div><div class="act-grid"><button class="btn btn-ghost" onclick="modalNapQuyChi()">🧑‍💼 Nạp quỹ chi (người giữ)</button></div>`;
   if(coTho){h+=grp('💰 Lương thợ');
     h+=`<div class="act-grid">${B('tra','','Trả lương')}${B('ung','','Ứng lương')}</div>`;
     h+=`<div style="height:8px"></div><div class="act-grid">${B('psth','','Phát sinh (cơm/bồi dưỡng)')}${B('khac','','Chi khác (ship…)')}</div>`;}
@@ -3004,7 +3095,7 @@ function gbsToggle(){
   const pd=el('gbs_paid');if(pd&&!ls)pd.checked=false;
   const expenseKind=(loai==='chi'||loai==='khac'||loai==='chidon'||loai==='den'||loai==='psth'||loai==='tra'||loai==='ung');
   show('gbs_ungvonrow',expenseKind);
-  const uv=el('gbs_ungvon');if(uv&&!expenseKind)uv.checked=false;
+  if(!expenseKind){const sg=el('gbs_seg');if(sg){sg.dataset.q='chi';sg.querySelectorAll('.chip').forEach((b,i)=>b.classList.toggle('sel',i===0));}}
   const canLap=(loai==='chi'||loai==='tra'||loai==='ung'||loai==='congls'||loai==='psth');
   show('gbs_laprow',canLap);
   const lapCb=el('gbs_lap');if(lapCb&&!canLap)lapCb.checked=false;
@@ -3037,30 +3128,29 @@ function submitGhiBoSung(){try{
   if(DB.settings.kyKhoa&&DB.settings.kyKhoaTime&&ts<=DB.settings.kyKhoaTime)
     return toast('Ngày này đã khóa sổ — không ghi thêm được.',true);
   const dg=(el('gbs_dg')&&el('gbs_dg').value)?el('gbs_dg').value.trim():'';
+  const qy=readQuy('gbs');
   let msg='';
-  if(loai==='chi'){chiPhiXuong({soTien:s,dienGiai:dg||'chi phí xưởng',ngay:ts});msg='Đã ghi chi tiền.';}
+  if(loai==='chi'){chiPhiXuong({soTien:s,dienGiai:dg||'chi phí xưởng',ngay:ts,quy:qy});msg='Đã ghi chi tiền.';}
   else if(loai==='bo'){boVon({soTien:s,dienGiai:dg,ngay:ts});msg='Đã ghi bỏ vốn.';}
   else if(loai==='rut'){rutVon({soTien:s,dienGiai:dg,ngay:ts});msg='Đã ghi rút tiền.';}
   else if(loai==='thu'){const chuId=(el('gbs_chu')||{}).value||'';if(!chuId)return toast('Chọn chủ hàng.',true);thuTien({chuHangId:chuId,soTien:s,ngay:ts});msg='Đã ghi thu tiền.';}
-  else if(loai==='tra'){const thoId=(el('gbs_tho')||{}).value||'';if(!thoId)return toast('Chọn thợ.',true);traLuong({thoId,soTien:s,ngay:ts});msg='Đã ghi trả lương.';}
-  else if(loai==='ung'){const thoId=(el('gbs_tho')||{}).value||'';if(!thoId)return toast('Chọn thợ.',true);ungLuong({thoId,soTien:s,ngay:ts});msg='Đã ghi ứng lương.';}
-  else if(loai==='chidon'){const donId=(el('gbs_don')||{}).value||'';if(!donId)return toast('Chọn đơn.',true);chiPhiDon({donId,soTien:s,dienGiai:dg||'chi phí đơn',ngay:ts});msg='Đã ghi chi phí đơn.';}
-  else if(loai==='den'){const donId=(el('gbs_don')||{}).value||'';if(!donId)return toast('Chọn đơn.',true);tienDen({donId,soTien:s,ngay:ts});msg='Đã ghi đền hàng.';}
-  else if(loai==='khac'){const chuId=(el('gbs_chu')||{}).value||'';chiKhac({soTien:s,dienGiai:dg||'ship/đền',ngay:ts,chuHangId:chuId||null});msg='Đã ghi chi khác.';}
+  else if(loai==='tra'){const thoId=(el('gbs_tho')||{}).value||'';if(!thoId)return toast('Chọn thợ.',true);traLuong({thoId,soTien:s,ngay:ts,quy:qy});msg='Đã ghi trả lương.';}
+  else if(loai==='ung'){const thoId=(el('gbs_tho')||{}).value||'';if(!thoId)return toast('Chọn thợ.',true);ungLuong({thoId,soTien:s,ngay:ts,quy:qy});msg='Đã ghi ứng lương.';}
+  else if(loai==='chidon'){const donId=(el('gbs_don')||{}).value||'';if(!donId)return toast('Chọn đơn.',true);chiPhiDon({donId,soTien:s,dienGiai:dg||'chi phí đơn',ngay:ts,quy:qy});msg='Đã ghi chi phí đơn.';}
+  else if(loai==='den'){const donId=(el('gbs_don')||{}).value||'';if(!donId)return toast('Chọn đơn.',true);tienDen({donId,soTien:s,ngay:ts,quy:qy});msg='Đã ghi đền hàng.';}
+  else if(loai==='khac'){const chuId=(el('gbs_chu')||{}).value||'';chiKhac({soTien:s,dienGiai:dg||'ship/đền',ngay:ts,chuHangId:chuId||null,quy:qy});msg='Đã ghi chi khác.';}
   else if(loai==='psth'){const thoId=(el('gbs_tho')||{}).value||'';if(!thoId)return toast('Chọn thợ.',true);
     const kind=(el('gbs_pskind')||{}).value||'com';
-    phatSinhTho({thoId,soTien:s,kind,dienGiai:dg,ngay:ts});msg='Đã ghi phát sinh cho thợ.';}
+    phatSinhTho({thoId,soTien:s,kind,dienGiai:dg,ngay:ts,quy:qy});msg='Đã ghi phát sinh cho thợ.';}
   else if(loai==='congls'){const thoId=(el('gbs_tho')||{}).value||'';if(!thoId)return toast('Chọn thợ.',true);
     congThoLichSu({thoId,soTien:s,ngay:ts});
-    if(el('gbs_paid')&&el('gbs_paid').checked)traLuong({thoId,soTien:s,ngay:ts});
+    if(el('gbs_paid')&&el('gbs_paid').checked)traLuong({thoId,soTien:s,ngay:ts,quy:qy});
     msg='Đã ghi công thợ (lịch sử).';}
   else if(loai==='dtls'){const chuId=(el('gbs_chu')||{}).value||'';if(!chuId)return toast('Chọn chủ hàng.',true);
     const mauId=(el('gbs_mau')||{}).value||'';
     const slipId=doanhThuLichSu({chuHangId:chuId,ngay:ts,dienGiai:dg,mauId:mauId||null,sl:_qty,donGia:_dgia});
     if(el('gbs_paid')&&el('gbs_paid').checked)thuTien({chuHangId:chuId,soTien:s,uuTien:slipId,ngay:ts});
     msg='Đã ghi đơn đã xong (lịch sử).';}
-  if((loai==='chi'||loai==='khac'||loai==='chidon'||loai==='den'||loai==='psth'||loai==='tra'||loai==='ung')&&el('gbs_ungvon')&&el('gbs_ungvon').checked){
-    boVon({soTien:s,dienGiai:'ứng chi'+(dg?' — '+dg:''),ngay:ts});msg=msg.replace(/\.$/,' + bỏ vốn.');}
   const dk=dayKey(ts),nd=new Date(),sameMonth=(y===nd.getFullYear()&&(mo-1)===nd.getMonth());
   csMode=sameMonth?'thang':'all';csRef=0;_csDayOpen[dk]=true;
   navCloseAll();render();toastUndo(msg+' ('+dd+'/'+mo+')');
@@ -3082,18 +3172,17 @@ function submitGhiBoSungLap(loai,s){try{
   if(loai==='psth')kind=(el('gbs_pskind')||{}).value||'com';
   const dg=(el('gbs_dg')&&el('gbs_dg').value)?el('gbs_dg').value.trim():'';
   const paid=(loai==='congls'&&el('gbs_paid')&&el('gbs_paid').checked);
-  const ungVon=((loai==='chi'||loai==='psth'||loai==='tra'||loai==='ung')&&el('gbs_ungvon')&&el('gbs_ungvon').checked);
+  const qy=readQuy('gbs');
   const days=gbsDays(tu,den);
   if(DB.settings.kyKhoa&&DB.settings.kyKhoaTime&&days.some(ds=>kmTs(ds)<=DB.settings.kyKhoaTime))
     return toast('Khoảng ngày chạm kỳ đã khóa — không ghi được.',true);
   let n=0;
   days.forEach(ds=>{const ts=kmTs(ds);if(ts>now())return;
-    if(loai==='chi')chiPhiXuong({soTien:s,dienGiai:dg||'chi phí xưởng',ngay:ts});
-    else if(loai==='tra')traLuong({thoId,soTien:s,ngay:ts});
-    else if(loai==='ung')ungLuong({thoId,soTien:s,ngay:ts});
-    else if(loai==='psth')phatSinhTho({thoId,soTien:s,kind,dienGiai:dg,ngay:ts});
-    else if(loai==='congls'){congThoLichSu({thoId,soTien:s,ngay:ts});if(paid)traLuong({thoId,soTien:s,ngay:ts});}
-    if(ungVon)boVon({soTien:s,dienGiai:'ứng chi'+(dg?' — '+dg:''),ngay:ts});
+    if(loai==='chi')chiPhiXuong({soTien:s,dienGiai:dg||'chi phí xưởng',ngay:ts,quy:qy});
+    else if(loai==='tra')traLuong({thoId,soTien:s,ngay:ts,quy:qy});
+    else if(loai==='ung')ungLuong({thoId,soTien:s,ngay:ts,quy:qy});
+    else if(loai==='psth')phatSinhTho({thoId,soTien:s,kind,dienGiai:dg,ngay:ts,quy:qy});
+    else if(loai==='congls'){congThoLichSu({thoId,soTien:s,ngay:ts});if(paid)traLuong({thoId,soTien:s,ngay:ts,quy:qy});}
     _csDayOpen[ds]=true;n++;});
   if(!n)return toast('Không có ngày hợp lệ.',true);
   const nd=new Date();
@@ -4110,6 +4199,7 @@ function modalSuaPhatSinh(btId){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)
     <div class="field" style="margin-bottom:8px"><label>Loại</label><div class="chipset" id="ps_kinds">${chips}</div></div>
     <div class="field"><label>Số tiền</label><input type="text" inputmode="numeric" class="sep" id="pse_sl" value="${sepStr(l.soTien)}" onfocus="this.select()"></div>
     <div class="field"><label>Ghi chú</label><input id="pse_gc" value="${(l.ghiChu||'').replace(/"/g,'&quot;')}" placeholder="VD: 2 bữa trưa…"></div>
+    ${quySeg('pse',((bt.dong.find(d=>d.tk===TK.QUY)||{}).quy==='chi')?'chi':'chinh')}
     <div class="hint" style="margin-bottom:12px">Ngày ${ng}. ${now()-bt.thoiDiem<HUY_WINDOW?'Vừa nhập nên sửa thẳng.':'Đã lâu nên máy tạo bút toán đảo giữ dấu vết rồi ghi lại số mới.'}</div>
     <button class="btn btn-primary" onclick="submitSuaPhatSinh('${btId}')">Lưu thay đổi</button>
     <div style="height:8px"></div>
@@ -4117,7 +4207,7 @@ function modalSuaPhatSinh(btId){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)
 }
 function submitSuaPhatSinh(btId){try{const s=numVal('pse_sl');if(s<=0)return toast('Nhập số tiền.',true);
   const gc=((el('pse_gc')&&el('pse_gc').value)||'').trim();
-  suaPhatSinh({btId,soTien:s,kind:_psKind,dienGiai:gc});closeSheet();render();toastUndo('Đã sửa khoản phát sinh.');}catch(e){toast(e.message,true)}}
+  suaPhatSinh({btId,soTien:s,kind:_psKind,dienGiai:gc,quy:readQuy('pse')});closeSheet();render();toastUndo('Đã sửa khoản phát sinh.');}catch(e){toast(e.message,true)}}
 function askXoaPhatSinh(btId){xacNhan('Xóa khoản phát sinh này?',()=>{try{xoaPhatSinh(btId);closeSheet();render();toast('Đã xóa khoản phát sinh.');}catch(e){toast(e.message,true)}},{ok:'Xóa',nguyHiem:true,title:'Xóa phát sinh'});}
 /* ---- Sửa/xóa "đơn của chủ hàng đã xong (lịch sử)" từ Chốt sổ ---- */
 function csEditItem(kind,btId){if(kind==='ps')return modalSuaPhatSinh(btId);if(kind==='dtls')return modalSuaDonLS(btId);if(kind==='khoan')return modalSuaKhoan(btId);}
@@ -4146,6 +4236,8 @@ function modalSuaKhoan(btId){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)ret
   const tho=thoId?getTho(thoId):null;const chu=chuId?getChu(chuId):null;
   const TITLE={vonvao:'Bỏ thêm vốn',vonra:'Rút tiền về nhà',luongtra:'Trả lương'+(tho?' — '+tho.ten:''),luongung:'Ứng lương'+(tho?' — '+tho.ten:''),chi:'Chi tiền xưởng',chikhac:'Chi khác (ship, đền…)',thu:'Thu tiền'+(chu?' — '+chu.ten:'')}[kind];
   const hasNote=(kind==='vonvao'||kind==='vonra'||kind==='chi'||kind==='chikhac');
+  const canQuy=(kind==='chi'||kind==='chikhac'||kind==='luongtra'||kind==='luongung');
+  const curQ=((bt.dong.find(d=>d.tk===TK.QUY)||{}).quy==='chi')?'chi':'chinh';
   const locked=DB.settings.kyKhoa&&DB.settings.kyKhoaTime&&bt.thoiDiem<=DB.settings.kyKhoaTime;
   if(locked){openSheet(TITLE,`
     <div class="card"><div class="card-pad">
@@ -4156,27 +4248,29 @@ function modalSuaKhoan(btId){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)ret
   openSheet('Sửa · '+TITLE,`
     <div class="field"><label>Số tiền</label><input type="text" inputmode="numeric" class="sep" id="sk_sl" value="${sepStr(so)}" onfocus="this.select()"></div>
     ${hasNote?`<div class="field"><label>Ghi chú</label><input id="sk_gc" value="${(note||'').replace(/"/g,'&quot;')}" placeholder="VD: tiền điện tháng 8"></div>`:''}
+    ${canQuy?quySeg('sk',curQ):''}
     <div class="hint" style="margin-bottom:12px">Ngày ${ng}. ${now()-bt.thoiDiem<HUY_WINDOW?'Vừa nhập nên sửa thẳng.':'Đã lâu nên máy tạo bút toán đảo giữ dấu vết rồi ghi lại số mới.'}</div>
     <button class="btn btn-primary" onclick="submitSuaKhoan('${btId}')">Lưu thay đổi</button>
     <div style="height:8px"></div>
     <button class="btn btn-danger btn-sm" style="width:100%" onclick="askXoaKhoan('${btId}')">🗑 Xóa khoản này</button>`);
 }
-function suaKhoan({btId,soTien,dienGiai}){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)throw new Error('Không tìm thấy khoản.');
+function suaKhoan({btId,soTien,dienGiai,quy}){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)throw new Error('Không tìm thấy khoản.');
   _psGuardKhoa(bt);const kind=_khoanKind(bt);if(!kind)throw new Error('Khoản này không sửa nhanh được.');
   const ng=bt.thoiDiem;const thoId=(bt.dong.find(d=>d.thoId!=null)||{}).thoId;const chuId=(bt.dong.find(d=>d.chuHangId!=null)||{}).chuHangId;
+  if(quy!=='chi'&&quy!=='chinh')quy=((bt.dong.find(d=>d.tk===TK.QUY)||{}).quy==='chi')?'chi':'chinh';
   _psGoOld(bt);
   if(kind==='vonvao')boVon({soTien,dienGiai,ngay:ng});
   else if(kind==='vonra')rutVon({soTien,dienGiai,ngay:ng});
-  else if(kind==='luongtra')traLuong({thoId,soTien,ngay:ng});
-  else if(kind==='luongung')ungLuong({thoId,soTien,ngay:ng});
-  else if(kind==='chi')chiPhiXuong({soTien,dienGiai:dienGiai||'chi phí xưởng',ngay:ng});
-  else if(kind==='chikhac')chiKhac({soTien,dienGiai:dienGiai||'ship/đền',ngay:ng,chuHangId:chuId||null});
+  else if(kind==='luongtra')traLuong({thoId,soTien,ngay:ng,quy});
+  else if(kind==='luongung')ungLuong({thoId,soTien,ngay:ng,quy});
+  else if(kind==='chi')chiPhiXuong({soTien,dienGiai:dienGiai||'chi phí xưởng',ngay:ng,quy});
+  else if(kind==='chikhac')chiKhac({soTien,dienGiai:dienGiai||'ship/đền',ngay:ng,chuHangId:chuId||null,quy});
   else if(kind==='thu')thuTien({chuHangId:chuId,soTien,ngay:ng});
   Store.save();
 }
 function submitSuaKhoan(btId){try{const s=numVal('sk_sl');if(s<=0)return toast('Nhập số tiền.',true);
   const gc=((el('sk_gc')&&el('sk_gc').value)||'').trim();
-  suaKhoan({btId,soTien:s,dienGiai:gc});closeSheet();render();toastUndo('Đã sửa khoản.');}catch(e){toast(e.message,true)}}
+  suaKhoan({btId,soTien:s,dienGiai:gc,quy:readQuy('sk')});closeSheet();render();toastUndo('Đã sửa khoản.');}catch(e){toast(e.message,true)}}
 function xoaKhoan(btId){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)return;_psGuardKhoa(bt);_psGoOld(bt);Store.save();}
 function askXoaKhoan(btId){xacNhan('Xóa khoản này khỏi sổ?',()=>{try{xoaKhoan(btId);closeSheet();render();toast('Đã xóa khoản.');}catch(e){toast(e.message,true)}},{ok:'Xóa',nguyHiem:true,title:'Xóa khoản'});}
 function _dtlsDaThu(slipId){let paid=0;DB.butToan.forEach(bt=>{if(bt.dao_cua||bt.daDao)return;bt.dong.forEach(d=>{if(d.tk===TK.PHAI_THU&&d.chieu==='CO'&&d.phieuGiaoId===slipId)paid+=d.soTien;});});return paid;}
@@ -4728,7 +4822,11 @@ function bcCauNoi(){
   rows.forEach(r=>{if(r[0]==='head')h+=`<div class="bridge-row head"><div class="bl">${r[1]}</div><div class="bv num">${fmt(r[2])}</div></div>`;
     else h+=`<div class="bridge-row"><div class="bridge-sign">${r[2]}</div><div class="bl">${r[1]}</div>
       <div class="bv num ${r[2]==='+'?'money-pos':'money-neg'}">${fmt(r[3])}</div></div><div class="bridge-explain">${r[4]}</div>`;});
-  h+=`<div class="bridge-row foot"><div class="bl">= Tiền thật trong két</div><div class="bv num">${fmt(quy)}</div></div></div>`;
+  h+=`<div class="bridge-row foot"><div class="bl">= Tiền thật trong két</div><div class="bv num">${fmt(quy)}</div></div>`;
+  {const _qc=quyChinh(),_qk=quyChi();
+   h+=`<div class="bridge-row" style="border-top:1px dashed var(--line-2);cursor:pointer" onclick="modalQuyChiTiet('chinh')"><div class="bridge-sign"></div><div class="bl">↳ 💼 Quỹ 1 · bạn giữ ›</div><div class="bv num">${fmt(_qc)}</div></div>`;
+   h+=`<div class="bridge-row" style="cursor:pointer" onclick="modalQuyChiTiet('chi')"><div class="bridge-sign"></div><div class="bl">↳ 🧑‍💼 Quỹ 2 · người giữ${_qk<0?' (đang nợ)':''} ›</div><div class="bv num ${_qk<0?'money-neg':''}">${fmt(_qk)}</div></div>`;}
+  h+=`</div>`;
   h+=`<div class="hint" style="text-align:center;margin-top:4px">Sổ giấy chỉ nói được một trong hai con số — và thường nói sai.</div>`;
   return h;
 }
@@ -4864,7 +4962,7 @@ function applyImport(obj){
   if(!obj||typeof obj!=='object'||!Array.isArray(obj.don)||!Array.isArray(obj.chuHang))throw new Error('không đúng định dạng Sổ Xưởng');
   DB=obj;if(!DB.settings)DB.settings={tyLeChung:0.15,view:'don'};DB.settings.mucCoDinh=DB.settings.mucCoDinh||[];
   DB.phienGio=DB.phienGio||[];DB.phieuThao=DB.phieuThao||[];DB.giaoTP=DB.giaoTP||[];DB.phieuGiao=DB.phieuGiao||[];DB.butToan=DB.butToan||[];DB.schema=DB.schema||SCHEMA;DB.mauSan=DB.mauSan||[];DB.chotBao=DB.chotBao||[];DB.giaoCong=DB.giaoCong||[];
-  seedOpSeq();Store.save();cur=(DB.settings&&DB.settings.view)||'tongquan';if(['home','thuchi','loinhuan'].includes(cur))cur='tongquan';if(!NAV.some(n=>n[0]===cur))cur='tongquan';render();
+  seedOpSeq();migrateLo();Store.save();cur=(DB.settings&&DB.settings.view)||'tongquan';if(['home','thuchi','loinhuan'].includes(cur))cur='tongquan';if(!NAV.some(n=>n[0]===cur))cur='tongquan';render();
   toast('Đã hiển thị lại: '+DB.don.length+' đơn · '+DB.chuHang.length+' chủ hàng · '+DB.tho.length+' thợ · '+DB.butToan.length+' bút toán.');
 }
 function phucHoi(ev){const f=ev.target.files[0];if(!f)return;const r=new FileReader();
@@ -5290,8 +5388,25 @@ document.addEventListener('pointerdown',function(e){
   if(tgt.matches('.btn,.tabs button,#nav button,.chip,.hdr-gear,.sheet-x,.gate-btn'))_tapRipple(tgt,e.clientX,e.clientY);
 },true);
 /* Đồng nhất "mọi đơn thuộc một lô": đơn cũ chưa có maLo → gán maLo = ma (lô 1 mẫu). Idempotent. */
-function migrateLo(){if(!DB||!DB.don)return false;let ch=false;
-  for(const d of DB.don){if(!d.maLo){d.maLo=d.ma||('ĐH-'+d.id);ch=true;}}return ch;}
+function migrateQuyChi(){if(!DB||!DB.butToan)return false;let ch=false;
+  // Gắn nhãn quỹ theo TÀI KHOẢN ĐỐI ỨNG (chuẩn hơn tên sự kiện, xử đúng cả bút toán đảo):
+  //  • đối ứng chi phí/lương (RO_CHUNG, GIA_VON, WIP, PHAI_TRA_THO) → Quỹ 2 (nhãn 'chi')
+  //  • đối ứng VON (bỏ vốn/rút) hoặc PHAI_THU (thu chủ hàng) → Quỹ 1 (không nhãn)
+  // CHỈ đụng dòng CHƯA có nhãn → không đè lựa chọn quỹ thủ công của người dùng. Idempotent.
+  const Q2SET={RO_CHUNG:1,GIA_VON:1,WIP:1,PHAI_TRA_THO:1};
+  for(const bt of DB.butToan){
+    const isExpense=bt.dong.some(d=>Q2SET[d.tk]);
+    const hasVon=bt.dong.some(d=>d.tk===TK.VON);
+    for(const d of bt.dong){if(d.tk!==TK.QUY)continue;
+      if(isExpense){if(d.quy===undefined){d.quy='chi';ch=true;}}
+      else if(hasVon){if(d.quy==='chi'){delete d.quy;ch=true;}}   // bỏ vốn/rút không bao giờ ở Quỹ 2
+    }
+  }
+  return ch;}
+function migrateLo(){let ch=false;
+  if(DB&&DB.don)for(const d of DB.don){if(!d.maLo){d.maLo=d.ma||('ĐH-'+d.id);ch=true;}}
+  if(migrateQuyChi())ch=true;
+  return ch;}
 function loadLocalOrSeed(){const saved=Store.load();window._cuMoi=false;
   if(saved&&saved.don&&saved.schema===SCHEMA){DB=saved;if(!DB.settings)DB.settings={tyLeChung:0.15,view:'don'};
     DB.phienGio=DB.phienGio||[];DB.phieuThao=DB.phieuThao||[];DB.mauSan=DB.mauSan||[];DB.chotBao=DB.chotBao||[];DB.giaoCong=DB.giaoCong||[];cur=DB.settings.view||'don';}
