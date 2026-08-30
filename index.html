@@ -466,7 +466,7 @@ let SEED_CLOCK=null; // demo: giả lập ngày khi tạo dữ liệu mẫu; ngo
 function now(){return SEED_CLOCK!=null?SEED_CLOCK:Date.now()}
 function n0(v){return (v||0).toLocaleString('vi-VN')}
 function fmt(n){n=Math.round(n);const s=Math.abs(n).toLocaleString('vi-VN');return (n<0?'−':'')+s+' đ'}
-function fmtShort(n){n=Math.round(n);const a=Math.abs(n);let s;if(a>=1e6)s=(a/1e6).toFixed(a>=1e7?0:1).replace('.',',')+'tr';else if(a>=1e3)s=Math.round(a/1e3)+'k';else s=a+'';return (n<0?'−':'')+s}
+function fmtShort(n){n=Math.round(n);return (n<0?'−':'')+Math.abs(n).toLocaleString('vi-VN')+'đ'}
 function sepStr(v){v=(''+(v==null?'':v)).replace(/[^\d]/g,'');return v?(+v).toLocaleString('vi-VN'):'';}
 function numVal(id){const e=el(id);return e?(+((''+e.value).replace(/[^\d]/g,''))||0):0;}
 /* Làm tròn tiền lẻ khi chốt lương: lẻ >500đ → lên 1000; =500đ → giữ 500; <500đ → về 0 */
