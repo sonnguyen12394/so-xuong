@@ -3310,7 +3310,7 @@ function kmCalc(){let grand=0;
     const lb=el('km_luubtn_'+d);if(lb)lb.disabled=!(t>0&&((el('km_tho_'+d)||{}).value||day.thoId));});
   const ge=el('km_grand');if(ge)ge.textContent=kmF(grand);kmSave();}
 function viewKeMuc(m){kmLoad();
-  m.innerHTML=`<div class="view-title">Tính sổ<small>Tính công · lưu tạm vào sổ</small></div><div id="kmWrap">${kmBodyHtml()}</div>`;
+  m.innerHTML=`<div class="view-title">Tính sổ<small>Máy tính công · tính nhanh</small></div><div id="kmWrap">${kmBodyHtml()}</div>`;
   el('fab').innerHTML='';kmCalc();}
 function kmRedraw(){const w=el('kmWrap');if(w){w.innerHTML=kmBodyHtml();kmCalc();}}
 function kmThoOpts(sel){return DB.tho.filter(t=>!t.isOwner).map(t=>`<option value="${t.id}" ${sel===t.id?'selected':''}>${t.ten}${t.nghi?' (nghỉ)':''}</option>`).join('');}
@@ -3347,42 +3347,15 @@ function kmBodyHtml(){let h='';
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <b style="font-size:14px">Ngày ${d+1}</b>
         ${kmDays.length>1?`<button class="mini-btn" onclick="kmDelDay(${d})">✕ xóa ngày</button>`:''}</div>
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <select id="km_tho_${d}" onchange="kmSync();kmCalc()" style="flex:1;min-width:0;padding:9px 8px;border:1.5px solid var(--line);border-radius:9px;font-size:14px;background:var(--card)"><option value="">— Chọn thợ —</option>${kmThoOpts(day.thoId)}</select>
-        <input type="date" id="km_ngay_${d}" value="${day.ngay||kmToday()}" max="${kmToday()}" onchange="kmSync()" style="flex:0 0 auto;padding:9px 8px;border:1.5px solid var(--line);border-radius:9px;font-size:13px;background:var(--card)">
-      </div>
       ${rows}
       <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:2px" onclick="kmAddLine(${d})">＋ Thêm dòng</button>
       <div class="kv" style="margin-top:8px;border-top:1px dashed var(--line-2);padding-top:8px"><div class="k">Tổng công ngày ${d+1}</div><div class="v big-num" id="km_day_${d}">0</div></div>
-      <button class="btn btn-primary" id="km_luubtn_${d}" style="width:100%;margin-top:8px" onclick="kmLuuCong(${d})">💾 Lưu công vào sổ</button>
     </div></div>`;});
   h+=`<button class="btn btn-primary" style="width:100%;margin-bottom:12px" onclick="kmAddDay()">＋ Tạo ngày mới</button>`;
   h+=`<div class="reveal" style="background:linear-gradient(160deg,#2F7A63,#256452);margin-bottom:12px"><div class="lbl" style="color:#CDEBE0">Tổng công tất cả ngày</div><div class="amt" id="km_grand">0</div></div>`;
-  /* Thẻ chi phí liên quan */
-  const cpNgay=kmCpNgay||kmToday();
-  const choTho=kmCpMode==='tho';
-  const modeChip=(v,lbl)=>`<div class="chip ${kmCpMode===v?'sel':''}" onclick="kmCpSetMode('${v}')">${lbl}</div>`;
-  const kindChips=Object.keys(PS_KIND).map(k=>`<div class="chip ${kmCpKind===k?'sel':''}" onclick="kmCpSetKind('${k}')">${PS_KIND[k]}</div>`).join('');
-  h+=`<div class="card" style="margin-bottom:12px"><div class="card-pad">
-      <b style="font-size:14px">🧾 Chi phí liên quan</b>
-      <div class="hint" style="margin-top:4px;margin-bottom:8px">Ghi thẳng vào sổ (tiền ra khỏi két).</div>
-      <div class="chips" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${modeChip('xuong','🏭 Chi phí xưởng')}${modeChip('tho','🍚 Cho thợ (cơm/bồi dưỡng)')}</div>
-      ${choTho?`<select id="km_cp_tho" onchange="kmCpSync()" style="width:100%;box-sizing:border-box;padding:9px 8px;border:1.5px solid var(--line);border-radius:9px;font-size:14px;background:var(--card);margin-bottom:8px"><option value="">— Chọn thợ —</option>${kmThoOpts(kmCpTho)}</select>
-      <div class="chips" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${kindChips}</div>`:''}
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <input type="text" inputmode="numeric" class="sep" id="km_cp_sl" value="${kmCpSl||''}" placeholder="Số tiền" onfocus="this.select()" oninput="kmCpSync()" style="flex:1;min-width:0;padding:10px;border:1.5px solid var(--line);border-radius:9px;text-align:right;font-weight:600">
-        <input type="date" id="km_cp_ngay" value="${cpNgay}" max="${kmToday()}" onchange="kmCpSync()" style="flex:0 0 auto;padding:9px 8px;border:1.5px solid var(--line);border-radius:9px;font-size:13px;background:var(--card)">
-      </div>
-      <input id="km_cp_dg" value="${(kmCpDg||'').replace(/"/g,'&quot;')}" placeholder="${choTho?'Ghi chú (VD: bồi dưỡng tăng ca)':'Ghi chú (VD: tiền điện)'}" oninput="kmCpSync()" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--line);border-radius:9px;font-size:14px;margin-bottom:8px">
-      <button class="btn btn-primary" style="width:100%" onclick="kmGhiChiPhi()">💾 Ghi ${choTho?'phát sinh cho thợ':'chi phí'} vào sổ</button>
-    </div></div>`;
-  h+=`<div class="card" style="margin-bottom:12px"><div class="card-pad">
-      <b style="font-size:14px">➕ Khoản tiền khác</b>
-      <div class="hint" style="margin-top:4px;margin-bottom:10px">Thu tiền chủ hàng · trả / ứng lương · bỏ / rút vốn · chi phí đơn · đền hàng · doanh thu đơn cũ. Chọn ngày bất kỳ.</div>
-      <button class="btn btn-primary" style="width:100%" onclick="modalGhiBoSung()">Ghi khoản khác vào sổ</button>
-    </div></div>`;
+  /* (Đã bỏ 2 thẻ: “Chi phí liên quan” và “Khoản tiền khác” theo yêu cầu) */
   h+=`<div class="act-grid"><button class="btn btn-ghost" onclick="kmChot()">📋 Bảng tính (sao chép)</button><button class="btn btn-ghost" onclick="kmReset()">Xóa hết máy tính</button></div>`;
-  h+=`<div class="hint" style="text-align:center;margin-top:8px">Máy tính lưu trong máy này (không kèm sao lưu). Chỉ khi bấm <b>Lưu vào sổ</b> / <b>Ghi chi phí</b> số mới vào Chốt sổ.</div>`;
+  h+=`<div class="hint" style="text-align:center;margin-top:8px">Máy tính nhanh, lưu trong máy này (không kèm sao lưu, không ghi vào sổ). Dùng <b>Bảng tính (sao chép)</b> để lấy kết quả. Ghi công/lương thật ở tab <b>Thợ</b>.</div>`;
   return h;}
 function kmAddLine(d){kmSync();kmDays[d].lines.push({sl:'',dg:''});kmRedraw();}
 function kmDelLine(d,i){kmSync();kmDays[d].lines.splice(i,1);if(!kmDays[d].lines.length)kmDays[d].lines.push({sl:'',dg:''});kmRedraw();}
@@ -5111,6 +5084,19 @@ function modalCaiDat(){
     <button class="btn btn-primary" onclick="moKetNoiDamMay()">${cloudOn()?'⛭ Quản lý đồng bộ':'☁ Bật đồng bộ đám mây'}</button>
     <div class="hint" style="margin:8px 0 0">Cho nhiều máy dùng chung một sổ. Cần một dự án Supabase (miễn phí).</div></div></div>`;
   h+=`<div class="section-h">Âm thanh & chạm</div><div class="card"><div class="card-pad"><div class="kv"><div class="k">Tiếng khi chạm nút</div><div class="v">${sfxOn()?'Bật 🔊':'Tắt 🔇'}</div></div><div style="height:10px"></div><button class="btn btn-ghost" onclick="toggleSfx()">${sfxOn()?'🔇 Tắt tiếng chạm':'🔊 Bật tiếng chạm'}</button><div class="hint" style="margin:8px 0 0">Có gợn sóng khi chạm nút; mục này chỉ bật/tắt tiếng. Lưu riêng theo máy.</div></div></div>`;
+  {const _on=edLockOn(),_open=_on&&edUnlocked();
+  const _stt=!_on?'Đang tắt':(_open?`Đang bật · đã mở khóa · còn <b id="edlock_cd">${edCdFmt()}</b>`:'Đang bật · đã khóa 🔒');
+  let _btns='';
+  if(!_on){_btns=`<button class="btn btn-primary" onclick="toggleEditLock()">🔒 Bật khóa quyền chỉnh sửa</button>`;}
+  else if(_open){_btns=`<button class="btn btn-ghost" onclick="edLockNow()">🔒 Khóa lại ngay</button>
+    <div style="height:8px"></div><button class="btn btn-ghost" onclick="toggleEditLock()">Tắt khóa quyền chỉnh sửa</button>`;}
+  else{_btns=`<button class="btn btn-primary" onclick="edUnlockUI()">🔑 Nhập mật mã để mở khóa</button>
+    <div style="height:8px"></div><button class="btn btn-ghost" onclick="toggleEditLock()">Tắt khóa quyền chỉnh sửa</button>`;}
+  h+=`<div class="section-h">Khóa quyền chỉnh sửa</div><div class="card"><div class="card-pad">
+    <div class="kv"><div class="k">Trạng thái</div><div class="v">${_stt}</div></div>
+    <div style="height:10px"></div>
+    ${_btns}
+    <div class="hint" style="margin:8px 0 0">Khi bật: mọi thao tác <b>nhập liệu / chỉnh sửa</b> trong app đều phải nhập mật mã. Mở khóa xong được cấp quyền trong <b>5 phút</b>, hết giờ tự khóa lại, muốn thao tác tiếp phải nhập lại. Riêng <b>Tính sổ</b> (máy tính công) vẫn dùng bình thường, không cần mật mã.</div></div></div>`;}
   h+=`<div class="section-h">Mẫu & bảng giá</div><div class="card"><div class="card-pad">
     <div class="hint" style="margin:0">Mỗi chủ hàng có mẫu, cỡ và giá riêng. Vào tab <b>Chủ hàng</b> → chọn chủ hàng để thêm/sửa mẫu.</div></div></div>`;
   h+=`<div class="section-h">Mục thu/chi cố định</div><div class="card"><div class="card-pad">
@@ -5145,6 +5131,7 @@ function modalCaiDat(){
     <div class="hint" style="margin:9px 0 0">“Nạp dữ liệu mẫu” thay bằng bộ số liệu demo một tháng. “Xóa trắng” xóa sạch mọi thứ (kể cả chủ xưởng) về đúng như lần đầu mở app, để tự nhập từ đầu.</div></div></div>`;
   h+=`<div class="divider-note" style="margin-top:16px;padding:12px">Sổ Xưởng — bản demo. Mọi con số kế toán do máy tự sinh từ sự kiện bạn nhập.</div>`;
   openSheet('Cài đặt & danh mục',h);
+  if(edLockOn()&&edUnlocked())edStartCd();
 }
 function openSoKeToan(){openSheet('Sổ kế toán (kỹ thuật)',bcSo());}
 function taiSaoLuu(){DB.settings.lastBackup=now();Store.save();
@@ -5781,6 +5768,105 @@ if(typeof Store!=='undefined'&&Store&&typeof Store.save==='function'){
     },90);
   });
 })();
+
+/* ================= KHÓA QUYỀN CHỈNH SỬA ================= */
+/* Khi bật (DB.settings.editLock): mọi thao tác NHẬP LIỆU / CHỈNH SỬA đều cần mật mã.
+   Mở khóa hiệu lực 60 giây rồi tự khóa lại. Xem báo cáo / điều hướng / TÍNH SỔ không bị chặn.
+   Cơ chế: nghe click ở pha CAPTURE trên document — nếu nút gọi 1 hàm chỉnh sửa mà đang khóa,
+   chặn ngay trước khi onclick chạy (dữ liệu không hề bị đụng), hiện ô nhập mật mã; nhập đúng
+   thì tự chạm lại đúng nút đó. */
+const EDIT_PW='123456789@';
+let _lockUntil=0;
+function edLockOn(){return !!(DB&&DB.settings&&DB.settings.editLock);}
+function edUnlocked(){return Date.now()<_lockUntil;}
+/* Danh sách hàm được coi là "chỉnh sửa / nhập liệu" → phải mở khóa mới chạy.
+   KHÔNG gồm: km* (Tính sổ), mc* (bàn tính), các hàm xem/điều hướng, và các hàm phụ trong
+   form (chỉ tới được sau khi đã mở form — mà mở form thì đã bị chặn ở trên). */
+const EDIT_FNS=new Set([
+ // nhận hàng / tạo đơn
+ 'modalTaoDon','submitTaoLo','moNhanNhanh','moNhanNhanhTuDon','nhanNhanhVao','nhanNhanhTatCa','nhanNhanhDon','nhanDuNhom','nhanPickTho','nhanPickPhieu',
+ // đơn: chi phí / đền / giao / sửa / đóng / hủy / xóa / trả lại
+ 'modalChiPhi','modalChiPhiDon','submitChiPhiDon','submitChiPhi','modalChiPhiXong','submitChiPhiXong','modalChiPhiLo','submitChiPhiLo',
+ 'modalTienDen','submitTienDen','modalThao','submitThao','askDao','doDao',
+ 'modalGiaoXe','submitGiaoXe','modalGiaoTP','submitGiaoTP','submitGiaoViec',
+ 'modalSuaDon','submitSuaDon','modalSuaDonLS','submitSuaDonLS','askXoaDonLS',
+ 'doDongDon','confirmDongDon','doHuyDon','confirmHuyDon','doXoaDon','confirmXoaDon','doHuyPhieu',
+ 'doTraLai','confirmTraLai','doTraHet','confirmTraHet','doXoaHan','doXoaHanDon','confirmXoaHanDon',
+ // chủ hàng
+ 'modalThemChu','modalSuaChu','submitChu','confirmXoaChu','modalThuTien','modalThuChuHang','submitThuTien','modalChonChuThu','modalGhiTien',
+ // thợ
+ 'modalThemTho','modalSuaTho','submitTho','confirmXoaTho','modalChotLuong','submitChotLuong','modalUng','submitUng','modalTraLuong','submitTraLuong',
+ 'modalPhatSinhTho','submitPhatSinhTho','submitSuaPhatSinh','askXoaPhatSinh','modalChamGio','submitChamGio','modalChamVe','submitChamVe',
+ 'modalXinCham','submitXinCham','modalNgayNghiBao','submitNghiBao','delNghiBao','modalDoiMocBao','submitMocBao','submitChotSoBao','submitChotSoSP',
+ 'nvToggleHu','nvXong','nvQuayLai','nvNhanGiuMo','nvDelLo','nvChonTraVe','nvChonGiu','nvChonBoLuon','nvAddLo','xoaGiaoCong','msChiLuu','msCapNhatCa',
+ // mẫu / mục cố định
+ 'modalThemMau','modalSuaMau','submitMau','doXoaMau','modalThemMauSan','modalSuaMauSan','submitMauSan','doXoaMauSan','mauXoaAnh',
+ 'modalThemMucCoDinh','submitMucCoDinh','xoaMucCoDinhUI',
+ // quỹ / vốn / điều chỉnh / đầu kỳ
+ 'modalNapQuyChi','submitNapQuyChi','modalTraQuyChi','submitTraQuyChi','modalDieuChinhQuy','submitDieuChinhQuy','modalRutVon','submitRutVon','submitBoVon','modalDauKy','submitDauKy',
+ // chốt sổ / khóa kỳ / nợ xấu / sửa khoản
+ 'doKhoaKy','suaKhoanAuto','submitSuaKhoan','askXoaKhoan','modalSuaKhoan','csEditItem','csThuHet','modalNoXau','submitNoXau',
+ // ghi bổ sung (đã bỏ khỏi Tính sổ, vẫn khóa phòng khi gọi tới)
+ 'modalGhiBoSung','submitGhiBoSung',
+ // sao lưu / phục hồi / xóa / hoàn tác
+ 'taiSaoLuu','phucHoiText','modalPhucHoi','hoiPhucNgay','hoanTacGanNhat','doHoanTac','doHoiPhuc','resetData','resetTrong','xoaSoRieng','submitSoRieng','boXoaTam','undoTuToast',
+ // đám mây (ghi đè dữ liệu)
+ 'cloudForcePush','cloudReloadNow','cloudLogout','ngatKetNoi','moKetNoiDamMay','luuKetNoiSheet','luuKetNoiGate','showConfigGate','showLogin','doLogin'
+]);
+function _edFnOf(node){const oc=node&&node.getAttribute&&node.getAttribute('onclick');if(!oc)return null;const m=(''+oc).match(/^\s*([A-Za-z_$][\w$]*)\s*\(/);return m?m[1]:null;}
+document.addEventListener('click',function(e){
+  if(!edLockOn()||edUnlocked())return;                 // tính năng tắt, hoặc đang trong 1 phút mở khóa
+  if(e.target.closest&&e.target.closest('#edlock_ovl'))return; // click trong chính ô mật mã
+  const t=e.target.closest&&e.target.closest('[onclick]');
+  if(!t)return;
+  const fn=_edFnOf(t);
+  if(!fn||!EDIT_FNS.has(fn))return;                     // không phải thao tác chỉnh sửa
+  e.preventDefault();e.stopImmediatePropagation();
+  askUnlock(function(){try{t.click();}catch(_){}}); // mở khóa xong thì tự chạm lại đúng nút
+},true);
+function askUnlock(after){
+  if(edUnlocked()){if(after)after();return;}
+  window.__edAfter=after||null;
+  let o=el('edlock_ovl');
+  if(!o){o=document.createElement('div');o.id='edlock_ovl';o.className='scrim';o.style.zIndex='3000';o.style.alignItems='center';document.body.appendChild(o);}
+  o.innerHTML=`<div class="confirmbox" style="transform:none">
+      <div class="sheet-h"><b>🔒 Nhập mật mã chỉnh sửa</b><button class="sheet-x" onclick="_edClose()">✕</button></div>
+      <div class="sheet-body">
+        <div class="hint" style="margin-top:0">Cần mật mã để nhập liệu / chỉnh sửa. Mở khóa có hiệu lực 5 phút.</div>
+        <input id="edlock_pw" type="password" inputmode="text" autocomplete="off" placeholder="Mật mã" onkeydown="if(event.key==='Enter'){event.preventDefault();_edOk();}" style="width:100%;box-sizing:border-box;padding:12px;border:1.5px solid var(--line);border-radius:11px;font-size:16px;margin:10px 0 4px;background:var(--card)">
+        <div id="edlock_err" class="hint" style="color:var(--thread);min-height:16px;margin:0 0 8px"></div>
+        <div class="act-grid">
+          <button class="btn btn-ghost" onclick="_edClose()">Thôi</button>
+          <button class="btn btn-primary" onclick="_edOk()">Mở khóa</button>
+        </div></div></div>`;
+  o.classList.add('on');o.style.display='flex';
+  setTimeout(function(){const i=el('edlock_pw');if(i)i.focus();},70);
+}
+function _edClose(){const o=el('edlock_ovl');if(o){o.classList.remove('on');o.style.display='none';o.innerHTML='';}window.__edAfter=null;}
+const EDIT_MS=5*60000; // hiệu lực mở khóa: 5 phút
+function _edOk(){const i=el('edlock_pw');const v=i?i.value:'';
+  if(v===EDIT_PW){_lockUntil=Date.now()+EDIT_MS;const f=window.__edAfter;_edClose();toast('Đã mở khóa chỉnh sửa trong 5 phút.');if(f)setTimeout(f,10);}
+  else{const er=el('edlock_err');if(er)er.textContent='Mật mã không đúng.';if(i){i.value='';i.focus();}}
+}
+/* Bật/tắt tính năng khóa. Bật: khóa ngay (phải nhập mật mã mới thao tác). Tắt: cần mật mã. */
+function toggleEditLock(){
+  if(!edLockOn()){DB.settings.editLock=true;_lockUntil=0;Store.save();toast('Đã bật khóa quyền chỉnh sửa. Nhập mật mã để mở khóa khi cần thao tác.');modalCaiDat();}
+  else{askUnlock(function(){DB.settings.editLock=false;_lockUntil=0;Store.save();toast('Đã tắt khóa quyền chỉnh sửa.');modalCaiDat();});}
+}
+/* Mở ô nhập mật mã ngay từ Cài đặt (chỗ nhập mật mã rõ ràng) rồi làm mới màn Cài đặt. */
+function edUnlockUI(){askUnlock(function(){modalCaiDat();});}
+/* Khóa lại ngay (không cần mật mã — chỉ thu hồi quyền). */
+function edLockNow(){_lockUntil=0;if(_edCdTimer){clearInterval(_edCdTimer);_edCdTimer=null;}toast('Đã khóa lại.');modalCaiDat();}
+/* Đếm ngược hiển thị ở Cài đặt */
+let _edCdTimer=null;
+function edCdFmt(){let ms=_lockUntil-Date.now();if(ms<0)ms=0;const s=Math.ceil(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+function edStartCd(){if(_edCdTimer)clearInterval(_edCdTimer);
+  _edCdTimer=setInterval(function(){const e=el('edlock_cd');
+    if(!e){clearInterval(_edCdTimer);_edCdTimer=null;return;}
+    if(!edUnlocked()){clearInterval(_edCdTimer);_edCdTimer=null;if(el('scrim').classList.contains('on'))modalCaiDat();return;}
+    e.textContent=edCdFmt();
+  },1000);
+}
 
 /* ---------- chạy ---------- */
 _installNavFrames();
