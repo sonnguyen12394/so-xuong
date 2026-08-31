@@ -1599,6 +1599,11 @@ function perBar(mode,ref,setFn,navFn,extra){extra=extra||'';
     <div style="flex:1;text-align:center;font-weight:800;font-size:14.5px">${P.label}</div>
     <button class="btn btn-ghost" style="flex:0 0 auto;width:44px;padding:9px 0;font-size:18px;line-height:1;${P.atNow?'opacity:.35;pointer-events:none':''}" onclick="${navFn}(1${extra})">›</button></div>`;
   return h;}
+/* Dải ngày rõ ràng "dd/mm/yyyy → dd/mm/yyyy" cho một kỳ (dùng gắn vào khối thu/chi) */
+function perRangeText(P){
+  if(!P||!isFinite(P.from)||!isFinite(P.to))return 'từ trước tới nay';
+  const a=new Date(P.from).toLocaleDateString('vi-VN'),b=new Date(P.to).toLocaleDateString('vi-VN');
+  return a===b?a:(a+' → '+b);}
 /* Chia [from,to] thành cột hợp lý: ≤8 ngày→theo ngày · ≤45 ngày→theo tuần · còn lại→theo tháng · 'Tất cả'→12 tháng gần nhất */
 function perBuckets(from,to){const DAY=86400000;
   if(!isFinite(from)||!isFinite(to)){const keys=thangGanDay(12);return {keys,keyFn:ymKey,labels:keys.map(ymLabel)};}
@@ -3714,6 +3719,7 @@ function bcLaiTam(){
   let h=`<div class="section-h" style="margin-top:2px">Lãi tạm — tiền mặt theo kỳ</div>
   <div class="hint" style="margin:-4px 4px 10px">Khác "Lãi thật" ở trên: tiền chủ đưa trừ tiền đã chi trong kỳ · khớp Chốt sổ.</div>`;
   h+=perBar(ltMode,ltRef,'ltSetMode','ltNav','');
+  h+=`<div class="hint" style="text-align:center;margin:-6px 4px 12px;font-weight:800;color:var(--ink-2)">🗓 Thu/chi trong kỳ: ${perRangeText(P)}</div>`;
   /* SỐ CHÍNH: LÃI TẠM */
   h+=`<div class="reveal" style="background:linear-gradient(160deg,${lai>=0?'#2F7A63,#256452':'#B4472F,#8E3320'})">
     <div class="lbl" style="color:#ECEFF1">Lãi tạm · ${kyTxt}</div><div class="amt">${(lai>=0?'+ ':'− ')+fmt(Math.abs(lai))}</div>
@@ -3722,9 +3728,12 @@ function bcLaiTam(){
   /* Chủ hàng đưa */
   h+=`<div class="card"><div class="card-pad">
     <div class="kv" style="cursor:pointer" onclick="ltDetail('thu')"><div class="k" style="font-weight:800">Tiền chủ hàng đưa <span style="color:var(--ink-3)">›</span></div><div class="v big-num money-pos">+ ${fmt(tongThu)}</div></div>
-    ${thuKhac?rowT('gồm khoản thu khác',thuKhac,false,'thukhac'):''}</div></div>`;
+    ${thuKhac?rowT('gồm khoản thu khác',thuKhac,false,'thukhac'):''}
+    <div class="hint" style="margin:4px 0 0">Kỳ ${ltMode==='ngay'?'ngày':ltMode==='tuan'?'tuần':ltMode==='thang'?'tháng':'tất cả'}: ${perRangeText(P)}</div></div></div>`;
   /* Chi cho sản xuất */
-  h+=`<div class="section-h">Chi cho sản xuất</div><div class="card"><div class="card-pad">
+  h+=`<div class="section-h" style="margin-bottom:2px">Chi cho sản xuất</div>
+    <div class="hint" style="margin:0 4px 8px">🗓 ${perRangeText(P)}</div>
+    <div class="card"><div class="card-pad">
     ${cpXuong?rowT('Chi phí xưởng (điện, kim chỉ…)',cpXuong,true,'cpxuong'):''}
     ${luong?rowT('Trả / ứng lương thợ',luong,true,'luong'):''}
     ${psth?rowT('Cơm, bồi dưỡng thợ',psth,true,'psth'):''}
@@ -3736,7 +3745,7 @@ function bcLaiTam(){
     <div class="kv"><div class="k" style="font-weight:800">Tổng chi sản xuất</div><div class="v big-num money-neg">− ${fmt(chiSx)}</div></div></div></div>`;
   /* = Lãi tạm */
   h+=`<div class="card"><div class="card-pad">
-    <div class="kv"><div class="k" style="font-weight:800">= Lãi tạm</div><div class="v big-num ${lai>=0?'money-pos':'money-neg'}">${(lai>=0?'+ ':'− ')+fmt(Math.abs(lai))}</div></div>
+    <div class="kv"><div class="k" style="font-weight:800">= Lãi tạm <span style="color:var(--ink-3);font-weight:600">(${perRangeText(P)})</span></div><div class="v big-num ${lai>=0?'money-pos':'money-neg'}">${(lai>=0?'+ ':'− ')+fmt(Math.abs(lai))}</div></div>
     <div class="hint" style="margin:6px 0 0">Số này có thể âm khi hàng đã làm nhưng chủ chưa trả tiền — chưa phải lãi cuối cùng. <b>Lãi thật</b> (tính lúc giao hàng) là phần ở trên.</div></div></div>`;
   /* Vốn — tách riêng */
   if(vonVao||vonRa){h+=`<div class="section-h">Vốn (không tính vào lãi)</div><div class="card"><div class="card-pad">
