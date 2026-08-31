@@ -1609,9 +1609,19 @@ function perBuckets(from,to){const DAY=86400000;
     while(d.getTime()<=to){keys.push(weekKey(d.getTime()));d.setDate(d.getDate()+7);}return {keys,keyFn:weekKey,labels:keys.map(weekLabel)};}
   const keys=[];const d=new Date(new Date(from).getFullYear(),new Date(from).getMonth(),1);
   while(d.getTime()<=to){keys.push(ymKey(d.getTime()));d.setMonth(d.getMonth()+1);}return {keys,keyFn:ymKey,labels:keys.map(ymLabel)};}
+/* Gộp theo TUẦN TRONG THÁNG cho biểu đồ tháng: Tuần 1 = ngày 1–7, Tuần 2 = 8–14, … Tuần 5 = 29–cuối.
+   Trả {keys,keyFn,labels} để miniThuChi dùng thay perBuckets. */
+function monthWeekBuckets(refTs){
+  const d=new Date(refTs);const y=d.getFullYear(),mo=d.getMonth();
+  const last=new Date(y,mo+1,0).getDate();
+  const keys=[],labels=[];
+  for(let i=0;i<5;i++){const startDay=1+i*7;if(startDay>last)break;keys.push('W'+(i+1));labels.push('Tuần '+(i+1));}
+  const keyFn=t=>{const dd=new Date(t).getDate();return 'W'+(Math.min(4,Math.floor((dd-1)/7))+1);};
+  return {keys,keyFn,labels};
+}
 /* events:[{t,thu,chi}] → thẻ biểu đồ cột Thu(xanh)/Chi(đỏ). '' nếu rỗng. */
 function miniThuChi(from,to,events,opts){opts=opts||{};
-  const {keys,keyFn,labels}=perBuckets(from,to);
+  const {keys,keyFn,labels}=opts.buckets||perBuckets(from,to);
   const thu={},chi={};keys.forEach(k=>{thu[k]=0;chi[k]=0;});
   events.forEach(e=>{const k=keyFn(e.t);if(!(k in thu))return;thu[k]+=e.thu||0;chi[k]+=e.chi||0;});
   const aThu=keys.map(k=>thu[k]),aChi=keys.map(k=>chi[k]);
@@ -1655,10 +1665,7 @@ function homeBody(){
     ${tile('⚠️',(canhBao.length+chamCho.length)+'',canhBao.length?'đơn cần xử lý cảnh báo':chamCho.length?'đơn chờ cắt châm':'không có cảnh báo',(canhBao.length+chamCho.length)?'money-neg':'',"go('don')")}
   </div>`;
   {const nn=nhanNhanhCount();if(nhanNhanhCoViec())h+=`<button class="btn btn-primary" style="width:100%;margin:2px 0 8px" onclick="moNhanNhanh()">⚡ Nhận nhanh — ${nn>0?nn+' công đoạn đủ điều kiện nhận':'xem công đoạn đang chờ'}</button>`;}
-  h+=`<div class="act-grid" style="margin:2px 0 4px">
-    <button class="btn btn-sage btn-sm" onclick="modalChonChuThu()">💵 Thu tiền</button>
-    <button class="btn btn-ghost btn-sm" onclick="modalChiPhi()">🧵 Chi tiền xưởng</button>
-    <button class="btn btn-ghost btn-sm wide" onclick="tqTab='nhatky';render()">🗒️ Lịch sử nhập — xem & sửa phát sinh</button></div>`;
+  // (Đã bỏ cụm nút Thu tiền / Chi tiền xưởng / Lịch sử nhập theo yêu cầu)
   // (Thẻ Quỹ chính/phụ ở Tổng quan đã bỏ — xem chi tiết 2 túi qua pill "Tiền trong két" ở đầu trang)
 
   // Việc nên làm — hàng bấm mở thẳng modal sẵn có
@@ -3711,7 +3718,7 @@ function bcLaiTam(){
   h+=`<div class="reveal" style="background:linear-gradient(160deg,${lai>=0?'#2F7A63,#256452':'#B4472F,#8E3320'})">
     <div class="lbl" style="color:#ECEFF1">Lãi tạm · ${kyTxt}</div><div class="amt">${(lai>=0?'+ ':'− ')+fmt(Math.abs(lai))}</div>
     <div class="note">Tiền chủ hàng đưa trừ tiền chi cho sản xuất · chưa tính bỏ/rút vốn</div></div>`;
-  h+=miniThuChi(P.from,P.to,ltChartEvents(P.from,P.to),{thuLbl:'Chủ hàng đưa',chiLbl:'Chi sản xuất'});
+  h+=miniThuChi(P.from,P.to,ltChartEvents(P.from,P.to),{thuLbl:'Chủ hàng đưa',chiLbl:'Chi sản xuất',buckets:ltMode==='thang'?monthWeekBuckets(P.from):null});
   /* Chủ hàng đưa */
   h+=`<div class="card"><div class="card-pad">
     <div class="kv" style="cursor:pointer" onclick="ltDetail('thu')"><div class="k" style="font-weight:800">Tiền chủ hàng đưa <span style="color:var(--ink-3)">›</span></div><div class="v big-num money-pos">+ ${fmt(tongThu)}</div></div>
@@ -3804,25 +3811,22 @@ function bcChotSo(){
     <div class="cs-stat-div"></div>
     ${csRowHTML('Vào − ra khỏi két',`vào +${csTr(T.vao)} <span class="cs-dot">·</span> ra −${csTr(T.ra)}`,rongKet)}
   </div></div>`;
-  h+=miniThuChi(perRange(csMode,csRef).from,perRange(csMode,csRef).to,data.days.map(d=>({t:d.t,thu:d.tot.vao,chi:-d.tot.ra})),{thuLbl:'Vào két',chiLbl:'Ra khỏi két'});
+  h+=miniThuChi(perRange(csMode,csRef).from,perRange(csMode,csRef).to,data.days.map(d=>({t:d.t,thu:d.tot.vao,chi:-d.tot.ra})),{thuLbl:'Vào két',chiLbl:'Ra khỏi két',buckets:csMode==='thang'?monthWeekBuckets(perRange(csMode,csRef).from):null});
   h+=`<div class="act-grid" style="margin:8px 0 10px">
     <button class="btn btn-ghost btn-sm" onclick="csMoHet()">▾ Mở hết ngày</button>
     <button class="btn btn-ghost btn-sm" onclick="csThuHet()">▸ Thu gọn hết</button></div>`;
   data.days.forEach(d=>{
     const open=!!_csDayOpen[d.dk];
     const bits=[];
-    if(d.tot.cong)bits.push('công '+fmtShort(d.tot.cong));
-    if(d.tot.dt)bits.push('DT '+fmtShort(d.tot.dt));
-    if(d.tot.vao)bits.push('vào +'+fmtShort(d.tot.vao));
-    if(d.tot.ra)bits.push('ra −'+fmtShort(d.tot.ra));
+    if(d.tot.vao)bits.push('<span style="color:var(--cloth);font-weight:800">vào +'+fmtShort(d.tot.vao)+'</span>');
+    if(d.tot.ra)bits.push('<span style="color:var(--thread);font-weight:800">ra −'+fmtShort(d.tot.ra)+'</span>');
     h+=`<div class="card" style="margin-bottom:10px">
-      <div class="slip" onclick="csToggleDay('${d.dk}')" style="cursor:pointer;background:var(--sage-soft)">
-        <div><div class="who" style="font-size:14.5px">${open?'▾':'▸'} ${d.wd}, ${d.dkLabel}</div>
-          <div class="meta">${bits.join(' · ')||'—'}</div></div>
-        <div style="display:flex;align-items:center;gap:8px;align-self:center">
-          <span style="color:var(--ink-3);font-size:12px">${d.nats.length} mục ›</span>
-          <button onclick="event.stopPropagation();askXoaNgay('${d.dk}')" title="Xóa cả ngày" style="border:none;background:transparent;color:var(--thread);font-size:15px;padding:6px;margin:-6px;cursor:pointer;line-height:1">🗑</button>
-        </div></div>`;
+      <div class="slip" onclick="csToggleDay('${d.dk}')" style="cursor:pointer;background:var(--sage-soft);align-items:flex-start;border-bottom:none">
+        <div style="flex:1;min-width:0">
+          <div class="who" style="font-size:14.5px">${open?'▾':'▸'} ${d.wd}, ${d.dkLabel} <small style="color:var(--ink-3);font-weight:700;white-space:nowrap">· ${d.nats.length} mục</small></div>
+          <div class="meta" style="line-height:1.6;margin-top:3px">${bits.join(' <span style="color:var(--ink-3)">·</span> ')||'—'}</div></div>
+        <button onclick="event.stopPropagation();askXoaNgay('${d.dk}')" title="Xóa cả ngày" style="flex:0 0 auto;border:none;background:transparent;color:var(--thread);font-size:16px;padding:6px;margin:-2px -4px 0 6px;cursor:pointer;line-height:1">🗑</button>
+      </div>`;
     if(open){
       d.nats.forEach(nt=>{
         const nkey=d.dk+'|'+nt.nat,nopen=!!_csNatOpen[nkey];
@@ -5084,19 +5088,16 @@ function modalCaiDat(){
     <button class="btn btn-primary" onclick="moKetNoiDamMay()">${cloudOn()?'⛭ Quản lý đồng bộ':'☁ Bật đồng bộ đám mây'}</button>
     <div class="hint" style="margin:8px 0 0">Cho nhiều máy dùng chung một sổ. Cần một dự án Supabase (miễn phí).</div></div></div>`;
   h+=`<div class="section-h">Âm thanh & chạm</div><div class="card"><div class="card-pad"><div class="kv"><div class="k">Tiếng khi chạm nút</div><div class="v">${sfxOn()?'Bật 🔊':'Tắt 🔇'}</div></div><div style="height:10px"></div><button class="btn btn-ghost" onclick="toggleSfx()">${sfxOn()?'🔇 Tắt tiếng chạm':'🔊 Bật tiếng chạm'}</button><div class="hint" style="margin:8px 0 0">Có gợn sóng khi chạm nút; mục này chỉ bật/tắt tiếng. Lưu riêng theo máy.</div></div></div>`;
-  {const _on=edLockOn(),_open=_on&&edUnlocked();
-  const _stt=!_on?'Đang tắt':(_open?`Đang bật · đã mở khóa · còn <b id="edlock_cd">${edCdFmt()}</b>`:'Đang bật · đã khóa 🔒');
-  let _btns='';
-  if(!_on){_btns=`<button class="btn btn-primary" onclick="toggleEditLock()">🔒 Bật khóa quyền chỉnh sửa</button>`;}
-  else if(_open){_btns=`<button class="btn btn-ghost" onclick="edLockNow()">🔒 Khóa lại ngay</button>
-    <div style="height:8px"></div><button class="btn btn-ghost" onclick="toggleEditLock()">Tắt khóa quyền chỉnh sửa</button>`;}
-  else{_btns=`<button class="btn btn-primary" onclick="edUnlockUI()">🔑 Nhập mật mã để mở khóa</button>
-    <div style="height:8px"></div><button class="btn btn-ghost" onclick="toggleEditLock()">Tắt khóa quyền chỉnh sửa</button>`;}
+  {const _open=edUnlocked();
+  const _stt=_open?`Đã mở khóa · còn <b id="edlock_cd">${edCdFmt()}</b>`:'Đang khóa 🔒';
+  const _btns=_open
+    ?`<button class="btn btn-ghost" onclick="edLockNow()">🔒 Khóa lại ngay</button>`
+    :`<button class="btn btn-primary" onclick="edUnlockUI()">🔑 Nhập mật mã để mở khóa</button>`;
   h+=`<div class="section-h">Khóa quyền chỉnh sửa</div><div class="card"><div class="card-pad">
     <div class="kv"><div class="k">Trạng thái</div><div class="v">${_stt}</div></div>
     <div style="height:10px"></div>
     ${_btns}
-    <div class="hint" style="margin:8px 0 0">Khi bật: mọi thao tác <b>nhập liệu / chỉnh sửa</b> trong app đều phải nhập mật mã. Mở khóa xong được cấp quyền trong <b>5 phút</b>, hết giờ tự khóa lại, muốn thao tác tiếp phải nhập lại. Riêng <b>Tính sổ</b> (máy tính công) vẫn dùng bình thường, không cần mật mã.</div></div></div>`;}
+    <div class="hint" style="margin:8px 0 0">Khóa <b>luôn bật</b>: mọi thao tác <b>nhập liệu / chỉnh sửa</b> trong app đều phải nhập mật mã. Mở khóa xong được cấp quyền trong <b>5 phút</b>, hết giờ tự khóa lại, muốn thao tác tiếp phải nhập lại. Riêng <b>Tính sổ</b> (máy tính công) vẫn dùng bình thường, không cần mật mã.</div></div></div>`;}
   h+=`<div class="section-h">Mẫu & bảng giá</div><div class="card"><div class="card-pad">
     <div class="hint" style="margin:0">Mỗi chủ hàng có mẫu, cỡ và giá riêng. Vào tab <b>Chủ hàng</b> → chọn chủ hàng để thêm/sửa mẫu.</div></div></div>`;
   h+=`<div class="section-h">Mục thu/chi cố định</div><div class="card"><div class="card-pad">
@@ -5770,14 +5771,14 @@ if(typeof Store!=='undefined'&&Store&&typeof Store.save==='function'){
 })();
 
 /* ================= KHÓA QUYỀN CHỈNH SỬA ================= */
-/* Khi bật (DB.settings.editLock): mọi thao tác NHẬP LIỆU / CHỈNH SỬA đều cần mật mã.
+/* Khóa LUÔN BẬT: mọi thao tác NHẬP LIỆU / CHỈNH SỬA đều cần mật mã.
    Mở khóa hiệu lực 60 giây rồi tự khóa lại. Xem báo cáo / điều hướng / TÍNH SỔ không bị chặn.
    Cơ chế: nghe click ở pha CAPTURE trên document — nếu nút gọi 1 hàm chỉnh sửa mà đang khóa,
    chặn ngay trước khi onclick chạy (dữ liệu không hề bị đụng), hiện ô nhập mật mã; nhập đúng
    thì tự chạm lại đúng nút đó. */
 const EDIT_PW='123456789@';
 let _lockUntil=0;
-function edLockOn(){return !!(DB&&DB.settings&&DB.settings.editLock);}
+function edLockOn(){return true;} /* Khóa quyền luôn bật, không tắt được — chỉ mở tạm bằng mật mã */
 function edUnlocked(){return Date.now()<_lockUntil;}
 /* Danh sách hàm được coi là "chỉnh sửa / nhập liệu" → phải mở khóa mới chạy.
    KHÔNG gồm: km* (Tính sổ), mc* (bàn tính), các hàm xem/điều hướng, và các hàm phụ trong
@@ -5847,11 +5848,6 @@ const EDIT_MS=5*60000; // hiệu lực mở khóa: 5 phút
 function _edOk(){const i=el('edlock_pw');const v=i?i.value:'';
   if(v===EDIT_PW){_lockUntil=Date.now()+EDIT_MS;const f=window.__edAfter;_edClose();toast('Đã mở khóa chỉnh sửa trong 5 phút.');if(f)setTimeout(f,10);}
   else{const er=el('edlock_err');if(er)er.textContent='Mật mã không đúng.';if(i){i.value='';i.focus();}}
-}
-/* Bật/tắt tính năng khóa. Bật: khóa ngay (phải nhập mật mã mới thao tác). Tắt: cần mật mã. */
-function toggleEditLock(){
-  if(!edLockOn()){DB.settings.editLock=true;_lockUntil=0;Store.save();toast('Đã bật khóa quyền chỉnh sửa. Nhập mật mã để mở khóa khi cần thao tác.');modalCaiDat();}
-  else{askUnlock(function(){DB.settings.editLock=false;_lockUntil=0;Store.save();toast('Đã tắt khóa quyền chỉnh sửa.');modalCaiDat();});}
 }
 /* Mở ô nhập mật mã ngay từ Cài đặt (chỗ nhập mật mã rõ ràng) rồi làm mới màn Cài đặt. */
 function edUnlockUI(){askUnlock(function(){modalCaiDat();});}
