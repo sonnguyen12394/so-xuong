@@ -496,6 +496,7 @@ function batchCds(p,x){
   if(x&&x.den!==undefined&&x.den!==null)return pCds(p).filter(n=>n<=x.den);
   return pCds(p);}
 function donGiaCds(don,cds){return sum(cds.map(i=>don.snapshotCD[i]?don.snapshotCD[i].donGia:0));}
+function diemCds(don,cds){return sum(cds.map(i=>don.snapshotCD[i]?(don.snapshotCD[i].diem||0):0));}
 function tenCds(don,cds){if(!cds.length)return '—';
   const t=cds.map(i=>don.snapshotCD[i]?don.snapshotCD[i].ten:'?');
   return t.length<=3?t.join(' + '):(t.slice(0,2).join(' + ')+' +'+(t.length-2)+' bước');}
@@ -543,6 +544,9 @@ function daDungSize(don,size){let m=0;
 /* tiền công thực của một phiếu: từng đợt tính theo đúng các bước đã làm */
 function congPhieu(p){const don=getDon(p.donId);if(!don)return 0;
   return sum((p.dongNhan||[]).map(x=>sum(Object.values(x.dat||{}))*donGiaCds(don,batchCds(p,x))));}
+/* điểm năng suất của một phiếu: y hệt tiền công nhưng dùng ĐIỂM công đoạn thay đơn giá */
+function diemPhieu(p){const don=getDon(p.donId);if(!don)return 0;
+  return sum((p.dongNhan||[]).map(x=>sum(Object.values(x.dat||{}))*diemCds(don,batchCds(p,x))));}
 /* ---------- TIẾN ĐỘ = tổng lượt công đoạn đã hoàn thành ---------- */
 function tongLuot(don){return don.snapshotCD.length*sum(sizesOf(don).map(s=>capDon(don,s)))}
 function luotXong(don){const nCD=don.snapshotCD.length;const ss=sizesOf(don);
@@ -597,7 +601,7 @@ function taoDon({chuHangId,mauId,ma,sizes,giaGiaCong,maLo}){
   const mau=getMau(mauId);
   const sizeList=(mau.sizeList&&mau.sizeList.length)?mau.sizeList.slice():SIZES.slice();
   const don={id:uid(),ma,chuHangId,mauId,ngay:now(),sizes:{...sizes},giaGiaCong,sizeList,maLo:maLo||ma||'',
-    snapshotCD:mau.congDoan.map(c=>({ten:c.ten,donGia:c.donGia,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)})),
+    snapshotCD:mau.congDoan.map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)})),
     gioDinhMuc:mau.gioDinhMuc||0,chamList:[],trangThai:'DANG_CHAY'};
   DB.don.push(don);Store.save();return don;
 }
@@ -1081,12 +1085,12 @@ function getMauSan(id){return dsMauSan().find(x=>x.id===id);}
 function themMauSan(o){const m={id:uid(),ten:(o.ten||'').trim(),
   sizeList:(o.sizeList&&o.sizeList.length)?o.sizeList.slice():SIZES.slice(),
   giaGiaCong:o.giaGiaCong||0,gioDinhMuc:o.gioDinhMuc||0,
-  congDoan:(o.congDoan||[]).map(c=>({ten:c.ten,donGia:c.donGia,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)})),soLan:0,ngay:now()};
+  congDoan:(o.congDoan||[]).map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)})),soLan:0,ngay:now()};
   dsMauSan().push(m);Store.save();return m;}
 function suaMauSan(id,o){const m=getMauSan(id);if(!m)return;
   m.ten=(o.ten||'').trim();m.sizeList=(o.sizeList&&o.sizeList.length)?o.sizeList.slice():SIZES.slice();
   m.giaGiaCong=o.giaGiaCong||0;m.gioDinhMuc=o.gioDinhMuc||0;
-  m.congDoan=(o.congDoan||[]).map(c=>({ten:c.ten,donGia:c.donGia,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));Store.save();}
+  m.congDoan=(o.congDoan||[]).map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));Store.save();}
 function xoaMauSan(id){DB.mauSan=dsMauSan().filter(x=>x.id!==id);Store.save();}
 function dungMauSan(id){const m=getMauSan(id);if(m){m.soLan=(m.soLan||0)+1;Store.save();}}
 /* ---- Lan truyền khi SỬA mẫu sẵn ----
@@ -1112,7 +1116,7 @@ function mauChuTheoKho(presetId,tenCu){
    công đoạn mới lấy giá từ mẫu sẵn. */
 function tronCongDoan(cur,neuCD){
   return neuCD.map(n=>{const cu=(cur||[]).find(c=>c.ten===n.ten);
-    return {ten:n.ten,donGia:cu?cu.donGia:n.donGia};});
+    return {ten:n.ten,donGia:cu?cu.donGia:n.donGia,diem:n.diem||0};});
 }
 function anhHuongMauSan(presetId,tenCu,neuCD,neuGio){
   const ke={mau:[],donDoi:[],donGiu:[]};
@@ -1575,9 +1579,13 @@ function svgDonut(parts,opts){opts=opts||{};parts=parts.filter(p=>p.v>0);
    Ngày · Tuần · Tháng · Tất cả  + nút ‹ › lùi/tới kỳ.
    perRange: {from,to,label,atNow}. perBar: thanh chọn kỳ.
    =========================================================== */
+let perTuy={from:null,to:null};   /* khoảng ngày tùy chọn dùng chung cho chế độ 'tuy' */
 function perRange(mode,ref){
   const A=new Date(ref||now());const p=n=>String(n).padStart(2,'0');
   if(mode==='all')return {from:-Infinity,to:Infinity,label:'Từ trước tới nay',atNow:true};
+  if(mode==='tuy'){if(perTuy.from==null||perTuy.to==null)return {from:-Infinity,to:Infinity,label:'Chọn ngày…',atNow:true};
+    const a=new Date(perTuy.from).toLocaleDateString('vi-VN'),b=new Date(perTuy.to).toLocaleDateString('vi-VN');
+    return {from:perTuy.from,to:perTuy.to,label:(a===b?a:a+' → '+b),atNow:true};}
   if(mode==='ngay'){const s=new Date(A);s.setHours(0,0,0,0);const e=new Date(s);e.setDate(e.getDate()+1);
     const wd=s.toLocaleDateString('vi-VN',{weekday:'long'});
     return {from:s.getTime(),to:e.getTime()-1,label:wd.charAt(0).toUpperCase()+wd.slice(1)+', '+s.toLocaleDateString('vi-VN'),atNow:sameDay(s.getTime(),now())};}
@@ -1592,13 +1600,37 @@ function perNav(mode,ref,dir){const A=new Date(ref||now());
   return A.getTime();}
 function perBar(mode,ref,setFn,navFn,extra){extra=extra||'';
   const P=perRange(mode,ref);
-  const B=[['ngay','Ngày'],['tuan','Tuần'],['thang','Tháng'],['all','Tất cả']];
-  let h=`<div class="tabs">`+B.map(([k,l])=>`<button class="${mode===k?'on':''}" onclick="${setFn}('${k}'${extra})">${l}</button>`).join('')+`</div>`;
-  if(mode!=='all')h+=`<div style="display:flex;align-items:center;gap:8px;margin:2px 0 12px">
+  const B=[['ngay','Ngày'],['tuan','Tuần'],['thang','Tháng'],['tuy','Chọn ngày']];
+  let h=`<div class="tabs">`+B.map(([k,l])=>{const oc=k==='tuy'?`perPick(function(){${setFn}('tuy'${extra})})`:`${setFn}('${k}'${extra})`;return `<button class="${mode===k?'on':''}" onclick="${oc}">${l}</button>`;}).join('')+`</div>`;
+  if(mode!=='all'&&mode!=='tuy')h+=`<div style="display:flex;align-items:center;gap:8px;margin:2px 0 12px">
     <button class="btn btn-ghost" style="flex:0 0 auto;width:44px;padding:9px 0;font-size:18px;line-height:1" onclick="${navFn}(-1${extra})">‹</button>
     <div style="flex:1;text-align:center;font-weight:800;font-size:14.5px">${P.label}</div>
     <button class="btn btn-ghost" style="flex:0 0 auto;width:44px;padding:9px 0;font-size:18px;line-height:1;${P.atNow?'opacity:.35;pointer-events:none':''}" onclick="${navFn}(1${extra})">›</button></div>`;
   return h;}
+/* Chọn khoảng ngày tùy ý — thay cho 'Tất cả'. Lưu ở perTuy, áp cho mọi màn đang ở chế độ 'tuy'. */
+function _perEarliest(){let m=now();(DB.butToan||[]).forEach(b=>{if(b&&b.thoiDiem&&b.thoiDiem<m)m=b.thoiDiem;});
+  (DB.phieuGiao||[]).forEach(p=>(p.dongNhan||[]).forEach(x=>{if(x&&x.ngay&&x.ngay<m)m=x.ngay;}));return m;}
+function perPick(applyFn){window.__perApply=applyFn||null;
+  const f0=perTuy.from!=null?dayKey(perTuy.from):dayKey(_perEarliest());
+  const t0=perTuy.to!=null?dayKey(perTuy.to):dayKey(now());const mx=dayKey(now());
+  const inSt='width:100%;box-sizing:border-box;padding:11px;border:1.5px solid var(--line);border-radius:11px;font-size:16px;background:var(--card)';
+  let o=el('per_ovl');if(!o){o=document.createElement('div');o.id='per_ovl';o.className='scrim';o.style.zIndex='3000';o.style.alignItems='center';document.body.appendChild(o);}
+  o.innerHTML=`<div class="confirmbox" style="transform:none">
+    <div class="sheet-h"><b>📅 Chọn khoảng ngày</b><button class="sheet-x" onclick="_perClose()">✕</button></div>
+    <div class="sheet-body">
+      <div class="field"><label>Từ ngày</label><input type="date" id="per_from" value="${f0}" max="${mx}" style="${inSt}"></div>
+      <div class="field"><label>Đến ngày</label><input type="date" id="per_to" value="${t0}" max="${mx}" style="${inSt}"></div>
+      <div id="per_err" class="hint" style="color:var(--thread);min-height:16px;margin:2px 0 8px"></div>
+      <div class="act-grid"><button class="btn btn-ghost" onclick="_perClose()">Thôi</button>
+        <button class="btn btn-primary" onclick="_perOk()">Xem</button></div>
+    </div></div>`;
+  o.classList.add('on');o.style.display='flex';}
+function _perClose(){const o=el('per_ovl');if(o){o.classList.remove('on');o.style.display='none';o.innerHTML='';}window.__perApply=null;}
+function _perOk(){const fv=(el('per_from')||{}).value,tv=(el('per_to')||{}).value;
+  if(!fv||!tv){const e=el('per_err');if(e)e.textContent='Chọn cả hai ngày.';return;}
+  let from=new Date(fv+'T00:00:00').getTime(),to=new Date(tv+'T23:59:59.999').getTime();
+  if(from>to){const x=from;from=to;to=x;}
+  perTuy={from,to};const f=window.__perApply;_perClose();if(f)setTimeout(f,10);}
 /* Dải ngày rõ ràng "dd/mm/yyyy → dd/mm/yyyy" cho một kỳ (dùng gắn vào khối thu/chi) */
 function perRangeText(P){
   if(!P||!isFinite(P.from)||!isFinite(P.to))return 'từ trước tới nay';
@@ -1625,7 +1657,28 @@ function monthWeekBuckets(refTs){
   return {keys,keyFn,labels};
 }
 /* events:[{t,thu,chi}] → thẻ biểu đồ cột Thu(xanh)/Chi(đỏ). '' nếu rỗng. */
+let chartOff={};   /* trang biểu đồ theo id, cho chế độ Chọn ngày */
+function chartPg(id,dir){chartOff[id]=Math.max(0,(chartOff[id]||0)+dir);}
+/* Biểu đồ Chọn ngày: mỗi NGÀY có thu/chi = 1 cột, phân trang ‹ › (mặc định trang mới nhất). */
+function _miniPaged(from,to,events,opts){
+  const id=opts.pager.id, re=opts.pager.reCall||'render()', PP=opts.pager.size||10;
+  const dmap={};events.forEach(e=>{if(e.t<from||e.t>to)return;const k=dayKey(e.t);if(!dmap[k])dmap[k]={thu:0,chi:0};dmap[k].thu+=e.thu||0;dmap[k].chi+=e.chi||0;});
+  const allKeys=Object.keys(dmap).filter(k=>dmap[k].thu!==0||dmap[k].chi!==0).sort();
+  if(!allKeys.length)return `<div class="card"><div class="card-pad"><div class="hint" style="text-align:center;padding:16px 0;margin:0">📊 Kỳ này chưa có thu/chi để vẽ biểu đồ.</div></div></div>`;
+  const pages=Math.ceil(allKeys.length/PP);
+  let pg=(id in chartOff)?Math.min(Math.max(0,chartOff[id]),pages-1):(pages-1);chartOff[id]=pg;
+  const winKeys=allKeys.slice(pg*PP,pg*PP+PP);
+  const labels=winKeys.map(dayLabel);
+  const groups=winKeys.map(k=>[{v:Math.abs(dmap[k].thu),color:'#2F7A63'},{v:Math.abs(dmap[k].chi),color:'#C0392B'}]);
+  let nav='';
+  if(pages>1){const atS=pg<=0,atE=pg>=pages-1;
+    nav=`<div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+      <button class="btn btn-ghost" style="flex:0 0 auto;width:44px;padding:8px 0;font-size:18px;line-height:1;${atS?'opacity:.35;pointer-events:none':''}" onclick="chartPg('${id}',-1);${re}">‹</button>
+      <div style="flex:1;text-align:center;font-size:12px;color:var(--ink-3)">${dayLabel(winKeys[0])} – ${dayLabel(winKeys[winKeys.length-1])} · trang ${pg+1}/${pages}</div>
+      <button class="btn btn-ghost" style="flex:0 0 auto;width:44px;padding:8px 0;font-size:18px;line-height:1;${atE?'opacity:.35;pointer-events:none':''}" onclick="chartPg('${id}',1);${re}">›</button></div>`;}
+  return `<div class="card"><div class="card-pad">${svgChart(labels,groups,{h:150})}${chartLegend([{name:opts.thuLbl||'Tiền vào',color:'#2F7A63'},{name:opts.chiLbl||'Tiền ra',color:'#C0392B'}])}${nav}</div></div>`;}
 function miniThuChi(from,to,events,opts){opts=opts||{};
+  if(opts.pager&&isFinite(from)&&isFinite(to))return _miniPaged(from,to,events,opts);
   const {keys,keyFn,labels}=opts.buckets||perBuckets(from,to);
   const thu={},chi={};keys.forEach(k=>{thu[k]=0;chi[k]=0;});
   events.forEach(e=>{const k=keyFn(e.t);if(!(k in thu))return;thu[k]+=e.thu||0;chi[k]+=e.chi||0;});
@@ -3724,7 +3777,7 @@ function bcLaiTam(){
   h+=`<div class="reveal" style="background:linear-gradient(160deg,${lai>=0?'#2F7A63,#256452':'#B4472F,#8E3320'})">
     <div class="lbl" style="color:#ECEFF1">Lãi tạm · ${kyTxt}</div><div class="amt">${(lai>=0?'+ ':'− ')+fmt(Math.abs(lai))}</div>
     <div class="note">Tiền chủ hàng đưa trừ tiền chi cho sản xuất · chưa tính bỏ/rút vốn</div></div>`;
-  h+=miniThuChi(P.from,P.to,ltChartEvents(P.from,P.to),{thuLbl:'Chủ hàng đưa',chiLbl:'Chi sản xuất',buckets:ltMode==='thang'?monthWeekBuckets(P.from):null});
+  h+=miniThuChi(P.from,P.to,ltChartEvents(P.from,P.to),{thuLbl:'Chủ hàng đưa',chiLbl:'Chi sản xuất',buckets:ltMode==='thang'?monthWeekBuckets(P.from):null,pager:ltMode==='tuy'?{id:'lt',reCall:'render()'}:null});
   /* Chủ hàng đưa */
   h+=`<div class="card"><div class="card-pad">
     <div class="kv" style="cursor:pointer" onclick="ltDetail('thu')"><div class="k" style="font-weight:800">Tiền chủ hàng đưa <span style="color:var(--ink-3)">›</span></div><div class="v big-num money-pos">+ ${fmt(tongThu)}</div></div>
@@ -3820,7 +3873,7 @@ function bcChotSo(){
     <div class="cs-stat-div"></div>
     ${csRowHTML('Vào − ra khỏi két',`vào +${csTr(T.vao)} <span class="cs-dot">·</span> ra −${csTr(T.ra)}`,rongKet)}
   </div></div>`;
-  h+=miniThuChi(perRange(csMode,csRef).from,perRange(csMode,csRef).to,data.days.map(d=>({t:d.t,thu:d.tot.vao,chi:-d.tot.ra})),{thuLbl:'Vào két',chiLbl:'Ra khỏi két',buckets:csMode==='thang'?monthWeekBuckets(perRange(csMode,csRef).from):null});
+  h+=miniThuChi(perRange(csMode,csRef).from,perRange(csMode,csRef).to,data.days.map(d=>({t:d.t,thu:d.tot.vao,chi:-d.tot.ra})),{thuLbl:'Vào két',chiLbl:'Ra khỏi két',buckets:csMode==='thang'?monthWeekBuckets(perRange(csMode,csRef).from):null,pager:csMode==='tuy'?{id:'cs',reCall:'render()'}:null});
   h+=`<div class="act-grid" style="margin:8px 0 10px">
     <button class="btn btn-ghost btn-sm" onclick="csMoHet()">▾ Mở hết ngày</button>
     <button class="btn btn-ghost btn-sm" onclick="csThuHet()">▸ Thu gọn hết</button></div>`;
@@ -3875,10 +3928,11 @@ function bcChotSo(){
 function viewTho(m){
   const thoList=DB.tho.filter(t=>!t.isOwner);
   const tongNo=sum(thoList.map(t=>Math.max(0,luongNoTho(t.id))));
-  let h=`<div class="tho-toolbar" id="thoBar">
-    <button class="btn btn-primary" onclick="modalThemTho()">＋ Thêm thợ</button>
-    <button class="btn btn-ghost" onclick="modalSoCong('')">📋 Rà công</button>
-    <button class="btn btn-tape" onclick="modalChotSo('')">🧾 Chốt sổ</button></div>`;
+  let h=`<div class="tho-toolbar" id="thoBar" style="gap:6px">
+    <button class="btn btn-primary" style="font-size:12px;padding:11px 4px" onclick="modalThemTho()">＋ Thêm thợ</button>
+    <button class="btn btn-ghost" style="font-size:12px;padding:11px 4px" onclick="modalSoCong('')">📋 Rà công</button>
+    <button class="btn btn-ghost" style="font-size:12px;padding:11px 4px" onclick="modalNangSuatXep()">📊 Năng suất</button>
+    <button class="btn btn-tape" style="font-size:12px;padding:11px 4px" onclick="modalChotSo('')">🧾 Chốt sổ</button></div>`;
   if(tongNo>0)h+=`<button class="btn btn-sage" style="margin-bottom:12px" onclick="confirmTraHet()">💵 Trả hết lương đang nợ (${fmt(tongNo)})</button>`;
   const _rows=DB.tho.map(t=>({t,ct:t.isOwner?-Infinity:thoConThieu(t)})).sort((a,b)=>b.ct-a.ct);
   h+=_rows.map(({t,ct})=>{const no=t.isOwner?0:ct;const est=(t.loai==='bao'||t.loai==='gio');const ns=nangSuat(t.id);const nghi=!t.isOwner&&!!t.nghi;
@@ -3909,10 +3963,10 @@ function viewTho(m){
 }
 function nangSuat(thoId){
   const ps=DB.phieuGiao.filter(p=>p.thoId===thoId&&p.trangThai!=='HUY');
-  let tongCai=0,congSP=0,tongPhe=0;
-  ps.forEach(p=>{const dat=pDat(p);tongCai+=dat;congSP+=congPhieu(p);tongPhe+=pPhe(p);});
+  let tongCai=0,congSP=0,tongPhe=0,tongDiem=0;
+  ps.forEach(p=>{const dat=pDat(p);tongCai+=dat;congSP+=congPhieu(p);tongPhe+=pPhe(p);tongDiem+=diemPhieu(p);});
   const pg=DB.phienGio.filter(x=>x.thoId===thoId);const tongGio=sum(pg.map(x=>x.gio));const tienGio=sum(pg.map(x=>x.tien));
-  return {tongCai,congSP,tienGio,tongCong:congSP+tienGio,tongPhe,tongGio};
+  return {tongCai,congSP,tienGio,tongCong:congSP+tienGio,tongPhe,tongGio,tongDiem};
 }
 /* tiền lương bao thực trả (để đối chiếu với giá trị công đoạn) — bao: giá ngày × số ngày; giờ: tổng tiền giờ đã chấm */
 function tienTraBao(t){const ns=nangSuat(t.id);
@@ -4190,6 +4244,236 @@ function chotSoBao({thoId,kieu,donGia,soDVi,payable,giaTriCD,tienTra,ngayCong,ng
     {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien:tienTra,thoId},{tk:TK.QUY,chieu:'CO',soTien:tienTra}]);
   DB.chotBao.push({id:uid(),thoId,kieu,ngay:now(),denNgay:now(),donGia,soDVi,payable,giaTriCD,tienTra,ngayCong:ngayCong||null,danTrai:!!danTrai});
   Store.save();}
+/* ---- Bảng xếp hạng NĂNG SUẤT: điểm của từng thợ, cao → thấp ---- */
+/* ========== NĂNG SUẤT — 3 tab: Năng suất · Thưởng · Mục tiêu ========== */
+let nsTab='ns';let nsYm=null;let tcState={ck:'',bac:[]};
+function nsCurYm(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
+function nsPrevYm(ym){const [y,m]=ym.split('-').map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
+function nsMonthRange(ym){const [y,m]=ym.split('-').map(Number);const from=new Date(y,m-1,1,0,0,0,0).getTime();const to=new Date(y,m,1,0,0,0,0).getTime()-1;return {from,to};}
+function nsShiftYm(d){const [y,m]=nsYm.split('-').map(Number);const dt=new Date(y,m-1+d,1);nsYm=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');nsRender();}
+function nsYmLabel(ym){const [y,m]=ym.split('-');return 'Tháng '+(+m)+'/'+y;}
+/* Số liệu MỘT thợ trong khoảng [from,to] — điểm, cái, phế, ngày công (ngày có làm bất kỳ việc gì) */
+function nsKy(thoId,from,to){let diem=0,cai=0,phe=0;const days=new Set();
+  DB.phieuGiao.filter(p=>p.thoId===thoId&&p.trangThai!=='HUY').forEach(p=>{const don=getDon(p.donId);
+    (p.dongNhan||[]).forEach(x=>{if(x.ngay<from||x.ngay>to)return;const bc=batchCds(p,x);
+      const sl=sum(Object.values(x.dat||{}));const ph=sum(Object.values(x.phe||{}));
+      if(sl<=0&&ph<=0)return;cai+=sl;phe+=ph;diem+=sl*diemCds(don,bc);days.add(dayKey(x.ngay));});});
+  DB.phienGio.filter(x=>x.thoId===thoId).forEach(pg=>{if(pg.ngay<from||pg.ngay>to)return;days.add(dayKey(pg.ngay));});
+  const tong=cai+phe;const tyle=tong>0?phe/tong*100:0;
+  return {diem,cai,phe,ngayCong:days.size,tyle};}
+/* Cấu hình thưởng — tự vá khuyết */
+function thuongCfg(){DB.settings=DB.settings||{};const c=DB.settings.thuong=DB.settings.thuong||{};
+  c.chuyenCan=Object.assign({on:true,mocNgay:0,tien:0},c.chuyenCan||{});
+  c.sanLuong =Object.assign({on:true,bac:[]},c.sanLuong||{});
+  c.chatLuong=Object.assign({on:true,nguong:0,tien:0,cua:false},c.chatLuong||{});
+  return c;}
+/* Thưởng của MỘT thợ theo kỳ */
+function thuongTho(thoId,from,to){const c=thuongCfg();const k=nsKy(thoId,from,to);const items=[];let tong=0;
+  if(c.chuyenCan.on){const dat=c.chuyenCan.mocNgay>0&&k.ngayCong>=c.chuyenCan.mocNgay;const tien=dat?(c.chuyenCan.tien||0):0;
+    items.push({key:'cc',dat,tien,mo:k.ngayCong+'/'+(c.chuyenCan.mocNgay||'—')+' ngày công'});tong+=tien;}
+  if(c.sanLuong.on){const bac=(c.sanLuong.bac||[]).slice().sort((a,b)=>a.moc-b.moc);let hit=null;bac.forEach(b=>{if(k.diem>=b.moc)hit=b;});
+    const tien=hit?(hit.tien||0):0;
+    items.push({key:'sl',dat:!!hit,tien,mo:sepStr(k.diem)+' điểm'+(hit?' · đạt bậc '+sepStr(hit.moc):(bac.length?' · chưa tới bậc '+sepStr(bac[0].moc):' · chưa đặt bậc'))});tong+=tien;}
+  let gateFail=false;
+  if(c.chatLuong.on){const co=(k.cai+k.phe)>0;const dat=co&&k.tyle<=c.chatLuong.nguong;const tien=dat?(c.chatLuong.tien||0):0;
+    if(c.chatLuong.cua&&co&&k.tyle>c.chatLuong.nguong)gateFail=true;
+    items.push({key:'cl',dat,tien,mo:co?('phế '+k.tyle.toFixed(1)+'% ≤ '+(c.chatLuong.nguong||0)+'%'):'chưa có hàng'});tong+=tien;}
+  if(gateFail){tong=0;items.forEach(it=>{it.tien=0;it.khoa=true;});}
+  return {k,items,tong,gateFail};}
+function daTraThuong(ym,thoId){return sum((DB.thuongTra||[]).filter(x=>x.ym===ym&&x.thoId===thoId).map(x=>x.tien));}
+/* ---- ĐIỀU HƯỚNG TAB ---- */
+function modalNangSuatXep(tab){nsTab=tab||nsTab||'ns';if(!nsYm)nsYm=nsCurYm();nsRender();}
+function nsSwitch(k){nsTab=k;nsRender();}
+function nsRender(){if(!nsYm)nsYm=nsCurYm();
+  const tabs=[['ns','Năng suất'],['thuong','Thưởng'],['muctieu','Mục tiêu']];
+  let h=`<div class="chipset" style="margin:-4px 0 12px">`+tabs.map(([k,l])=>`<div class="chip ${nsTab===k?'sel':''}" onclick="nsSwitch('${k}')">${l}</div>`).join('')+`</div>`;
+  h+=nsTab==='thuong'?nsTabThuong():nsTab==='muctieu'?nsTabMucTieu():nsTabNS();
+  openSheet('Năng suất thợ',h);}
+/* ---- TAB 1: NĂNG SUẤT (xếp hạng điểm, cộng dồn) ---- */
+function nsTabNS(){
+  const rows=DB.tho.filter(t=>!t.isOwner).map(t=>({t,ns:nangSuat(t.id)})).sort((a,b)=>b.ns.tongDiem-a.ns.tongDiem);
+  let h=`<div class="hint" style="margin:-2px 0 12px">Điểm năng suất = Σ (số cái × điểm công đoạn), cộng dồn từ đầu. Bấm vào một thợ để xem chi tiết.</div>`;
+  if(!rows.length)return h+`<div class="divider-note" style="padding:16px">Chưa có thợ.</div>`;
+  const max=Math.max(1,rows[0].ns.tongDiem);
+  h+=`<div class="card">`;
+  rows.forEach((r,i)=>{const d=r.ns.tongDiem;const pct=Math.max(2,Math.round(d/max*100));
+    const hạng=i===0?'🥇':i===1?'🥈':i===2?'🥉':`<b style="display:inline-block;min-width:20px;color:var(--ink-3)">${i+1}.</b>`;
+    const nghi=r.t.nghi?` · <span style="color:var(--ink-3)">tạm nghỉ</span>`:'';
+    h+=`<div class="slip" onclick="modalThoChiTiet('${r.t.id}')">
+      <div style="min-width:0;flex:1">
+        <div class="who">${hạng} ${escHtml(r.t.ten)}${nghi}</div>
+        <div class="meta">${sepStr(r.ns.tongCai)} cái · ${thoLoaiTen(r.t)}</div>
+        <div style="height:5px;background:var(--line-2);border-radius:4px;margin-top:7px;overflow:hidden"><div style="height:100%;width:${d>0?pct:0}%;background:var(--brand)"></div></div>
+      </div>
+      <div class="slip-right" style="text-align:right;margin-left:10px"><b style="font-size:16px">${sepStr(d)}</b><div style="font-size:10px;color:var(--ink-3)">điểm</div></div></div>`;});
+  h+=`</div>`;return h;}
+/* ---- TAB 2: THƯỞNG ---- */
+function nsKyNav(){return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px">
+    <button class="btn btn-ghost btn-sm" onclick="nsShiftYm(-1)" style="min-width:44px">‹</button>
+    <b style="font-size:15px">${nsYmLabel(nsYm)}</b>
+    <button class="btn btn-ghost btn-sm" onclick="nsShiftYm(1)" style="min-width:44px">›</button></div>`;}
+function nsPolDesc(ck,cfg){
+  if(ck==='chuyenCan')return cfg.mocNgay>0?`Đủ ${cfg.mocNgay} ngày công/tháng → thưởng ${fmt(cfg.tien)}`:'Chưa đặt mốc — bấm ⚙ để đặt số ngày & tiền.';
+  if(ck==='sanLuong'){const b=(cfg.bac||[]).slice().sort((a,b)=>a.moc-b.moc);return b.length?('Bậc thang: '+b.map(x=>sepStr(x.moc)+'đ điểm→'+fmtShort(x.tien)).join('  ·  ')):'Chưa đặt bậc — bấm ⚙ để thêm mốc điểm.';}
+  return (cfg.nguong>0||cfg.tien>0)?`Phế ≤ ${cfg.nguong}% → thưởng ${fmt(cfg.tien)}${cfg.cua?' · CỬA KHÓA (phế vượt ngưỡng thì mất mọi thưởng kỳ đó)':''}`:'Chưa đặt ngưỡng — bấm ⚙ để đặt % phế & tiền.';}
+function nsTabThuong(){const {from,to}=nsMonthRange(nsYm);const c=thuongCfg();
+  const workers=DB.tho.filter(t=>!t.isOwner);
+  const data=workers.map(t=>({t,r:thuongTho(t.id,from,to)}));
+  let h=nsKyNav();
+  if(!workers.length)return h+`<div class="divider-note" style="padding:16px">Chưa có thợ.</div>`;
+  h+=`<div class="hint" style="margin:-2px 0 12px">Số liệu theo tháng đang chọn. Anh tự đặt mốc ở nút ⚙ mỗi chính sách; thợ đạt thì hiện tiền thưởng.</div>`;
+  const POL=[['chuyenCan','Chuyên cần','cc'],['sanLuong','Sản lượng','sl'],['chatLuong','Chất lượng','cl']];
+  POL.forEach(([ck,label,ikey])=>{const cfg=c[ck];
+    h+=`<div class="card" style="margin-bottom:12px"><div class="card-pad">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
+        <b style="font-size:15px">${label}${cfg.on?'':' <small style="color:var(--ink-3);font-weight:600">· đang tắt</small>'}</b>
+        <button class="btn btn-ghost btn-sm" onclick="modalThuongCfg('${ck}')">⚙ Đặt mốc</button></div>
+      <div class="hint" style="margin:0 0 6px">${nsPolDesc(ck,cfg)}</div>`;
+    if(cfg.on){data.forEach(({t,r})=>{const it=r.items.find(x=>x.key===ikey);if(!it)return;
+      const right=it.khoa?`<span style="color:var(--thread);font-size:11.5px">🔒 khóa</span>`
+        :it.dat?`<b style="color:var(--brand);white-space:nowrap">+${fmt(it.tien)}</b>`
+        :`<span style="color:var(--ink-3);font-size:12px">chưa đạt</span>`;
+      h+=`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line-2)">
+        <div style="min-width:0"><div style="font-weight:600;font-size:13.5px">${escHtml(t.ten)}</div>
+          <div style="font-size:11.5px;color:var(--ink-3)">${it.mo}</div></div>
+        <div style="text-align:right">${right}</div></div>`;});}
+    h+=`</div></div>`;});
+  const tongKy=sum(data.map(d=>d.r.tong));const daTra=sum(workers.map(t=>daTraThuong(nsYm,t.id)));
+  h+=`<div class="card"><div class="card-pad">
+    <div class="kv"><div class="k">Tổng thưởng ${nsYmLabel(nsYm).toLowerCase()}</div><div class="v big-num">${fmt(tongKy)}</div></div>
+    <div class="kv"><div class="k">Đã trả</div><div class="v">${fmt(daTra)}</div></div>
+    <div class="kv"><div class="k">Còn phải trả</div><div class="v big-num money-neg">${fmt(Math.max(0,tongKy-daTra))}</div></div></div></div>
+    <div class="act-grid" style="margin-top:8px"><button class="btn btn-sage wide" onclick="modalTraThuongKy()">💵 Trả thưởng tháng này</button></div>`;
+  return h;}
+/* ---- Cấu hình mốc thưởng ---- */
+function modalThuongCfg(ck){const c=thuongCfg();tcState={ck,bac:(c.sanLuong.bac||[]).map(x=>({...x}))};drawThuongCfg();}
+function tcAddBac(){tcState.bac.push({moc:0,tien:0});drawThuongCfg();}
+function tcDelBac(i){tcState.bac.splice(i,1);drawThuongCfg();}
+function drawThuongCfg(){const ck=tcState.ck;const c=thuongCfg();const cfg=c[ck];
+  const label={chuyenCan:'Chuyên cần',sanLuong:'Sản lượng',chatLuong:'Chất lượng'}[ck];
+  const inSt=`padding:11px;border:1.5px solid var(--line);border-radius:11px;font-weight:600;text-align:right;box-sizing:border-box;width:100%`;
+  const onBox=`<label style="display:flex;align-items:center;gap:9px;padding:11px 12px;margin-bottom:12px;background:var(--sage-soft);border-radius:12px;cursor:pointer;font-size:13.5px">
+    <input type="checkbox" id="tc_on" ${cfg.on?'checked':''} style="width:18px;height:18px;flex:none"><b>Bật chính sách này</b></label>`;
+  let body='';
+  if(ck==='chuyenCan'){
+    body=`${onBox}
+      <div class="field"><label>Số ngày công tối thiểu / tháng</label><input type="text" inputmode="numeric" id="tc_moc" value="${cfg.mocNgay||''}" placeholder="VD 22" style="${inSt}"></div>
+      <div class="field"><label>Tiền thưởng khi đạt</label><input type="text" inputmode="numeric" class="sep" id="tc_tien" value="${sepStr(cfg.tien||0)}" style="${inSt}"></div>
+      <div class="hint">Ngày công = số ngày khác nhau thợ có làm bất kỳ việc gì (may/vắt/giờ…) trong tháng.</div>`;
+  } else if(ck==='chatLuong'){
+    body=`${onBox}
+      <div class="field"><label>Tỉ lệ phế tối đa (%)</label><input type="number" step="0.1" id="tc_nguong" value="${cfg.nguong||0}" style="${inSt}"></div>
+      <div class="field"><label>Tiền thưởng khi đạt</label><input type="text" inputmode="numeric" class="sep" id="tc_tien" value="${sepStr(cfg.tien||0)}" style="${inSt}"></div>
+      <label style="display:flex;align-items:flex-start;gap:9px;padding:11px 12px;margin-bottom:12px;background:var(--tape-soft,#FFF3E6);border-radius:12px;cursor:pointer;font-size:13px;line-height:1.4">
+        <input type="checkbox" id="tc_cua" ${cfg.cua?'checked':''} style="width:18px;height:18px;flex:none;margin-top:1px">
+        <span><b>Dùng làm cửa khóa</b> — nếu tỉ lệ phế vượt ngưỡng thì thợ đó <b>mất toàn bộ</b> thưởng của tháng (cả chuyên cần & sản lượng).</span></label>
+      <div class="hint">Tỉ lệ phế = phế ÷ (cái tốt + phế) trong tháng.</div>`;
+  } else {
+    body=`${onBox}
+      <div class="section-h" style="margin-top:0">Bậc thang theo điểm (đạt bậc cao nhất được tính)</div>
+      <div class="card"><div class="card-pad" style="padding-top:8px;padding-bottom:8px">
+      ${tcState.bac.length?tcState.bac.map((b,i)=>`<div style="display:grid;grid-template-columns:1.2fr 1.3fr auto;gap:6px;margin-bottom:6px;align-items:center">
+        <input type="text" inputmode="numeric" value="${b.moc||''}" placeholder="mốc điểm" oninput="tcState.bac[${i}].moc=+((''+this.value).replace(/[^\\d]/g,''))||0" style="${inSt}">
+        <input type="text" inputmode="numeric" class="sep" value="${sepStr(b.tien||0)}" placeholder="thưởng" oninput="tcState.bac[${i}].tien=+((''+this.value).replace(/[^\\d]/g,''))||0" style="${inSt}">
+        <button class="btn btn-ghost btn-sm" onclick="tcDelBac(${i})" style="padding:8px 12px">✕</button></div>`).join(''):`<div class="divider-note" style="padding:8px">Chưa có bậc nào.</div>`}
+      </div></div>
+      <button class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:12px" onclick="tcAddBac()">＋ Thêm bậc</button>
+      <div class="hint">VD: 5.000 điểm → 200k, 8.000 điểm → 400k. Chưa có baseline thì để trống, chạy quan sát vài tuần rồi đặt.</div>`;
+  }
+  openSheet('Đặt mốc — '+label,body+`<div class="act-grid" style="margin-top:8px"><button class="btn btn-primary wide" onclick="submitThuongCfg('${ck}')">Lưu mốc</button></div>`);}
+function submitThuongCfg(ck){try{const c=thuongCfg();
+  if(ck==='chuyenCan'){c.chuyenCan.mocNgay=numVal('tc_moc');c.chuyenCan.tien=numVal('tc_tien');c.chuyenCan.on=el('tc_on').checked;}
+  else if(ck==='chatLuong'){c.chatLuong.nguong=Math.max(0,+((''+((el('tc_nguong')||{}).value||'0')).replace(/[^\d.]/g,''))||0);c.chatLuong.tien=numVal('tc_tien');c.chatLuong.cua=el('tc_cua').checked;c.chatLuong.on=el('tc_on').checked;}
+  else {c.sanLuong.bac=tcState.bac.filter(b=>b.moc>0).sort((a,b)=>a.moc-b.moc);c.sanLuong.on=el('tc_on').checked;}
+  DB.settings.thuong=c;Store.save();closeSheet();toast('Đã lưu mốc thưởng.');}catch(e){toast(e.message,true)}}
+/* ---- Trả thưởng (ghi sổ: RO_CHUNG ↓ chi phí / QUY ↓ tiền) ---- */
+function modalTraThuongKy(){const {from,to}=nsMonthRange(nsYm);const workers=DB.tho.filter(t=>!t.isOwner);
+  const rows=workers.map(t=>({t,con:Math.max(0,thuongTho(t.id,from,to).tong-daTraThuong(nsYm,t.id))})).filter(x=>x.con>0);
+  if(!rows.length)return toast('Không có thưởng nào để trả tháng này.',true);
+  let h=`<div class="hint" style="margin-top:0">Trả thưởng ${nsYmLabel(nsYm).toLowerCase()}. Mỗi lần trả ghi vào sổ là chi phí (giảm lãi) và tiền ra khỏi két.</div><div class="card">`;
+  rows.forEach(({t,con})=>{h+=`<div class="slip"><div><div class="who">${escHtml(t.ten)}</div><div class="meta">thưởng còn lại</div></div>
+    <div style="display:flex;align-items:center;gap:10px"><b class="big-num money-neg">${fmt(con)}</b>
+    <button class="btn btn-sage btn-sm" onclick="traThuongTho('${t.id}')">Trả</button></div></div>`;});
+  h+=`</div><div class="act-grid" style="margin-top:8px"><button class="btn btn-primary wide" onclick="traThuongTatCa()">Trả tất cả (${fmt(sum(rows.map(r=>r.con)))})</button></div>`;
+  openSheet('Trả thưởng tháng này',h);}
+function _thuongDienGiai(ten){const [y,m]=nsYm.split('-');return 'Thưởng năng suất ('+ten+') · T'+(+m)+'/'+y;}
+function traThuongTho(thoId){const {from,to}=nsMonthRange(nsYm);const con=Math.max(0,thuongTho(thoId,from,to).tong-daTraThuong(nsYm,thoId));
+  if(con<=0)return toast('Không còn thưởng để trả.',true);const t=getTho(thoId);
+  xacNhan(`Trả thưởng ${fmt(con)} cho ${t.ten}?\nGhi sổ: chi phí thưởng (giảm lãi), tiền ra khỏi két.`,()=>doTraThuong(thoId,con),{ok:'Trả & ghi sổ'});}
+function doTraThuong(thoId,con){try{beginOp();const t=getTho(thoId);
+  ghi(_thuongDienGiai(t.ten),[{tk:TK.RO_CHUNG,chieu:'NO',soTien:con},{tk:TK.QUY,chieu:'CO',soTien:con}]);
+  DB.thuongTra=DB.thuongTra||[];DB.thuongTra.push({id:uid(),ym:nsYm,thoId,tien:con,ngay:now()});
+  Store.save();render();closeSheet();toast('Đã trả & ghi sổ thưởng.');}catch(e){toast(e.message,true)}}
+function traThuongTatCa(){const {from,to}=nsMonthRange(nsYm);const workers=DB.tho.filter(t=>!t.isOwner);
+  const rows=workers.map(t=>({t,con:Math.max(0,thuongTho(t.id,from,to).tong-daTraThuong(nsYm,t.id))})).filter(x=>x.con>0);
+  if(!rows.length)return toast('Không còn thưởng để trả.',true);const tong=sum(rows.map(r=>r.con));
+  xacNhan(`Trả tất cả thưởng ${nsYmLabel(nsYm).toLowerCase()} = ${fmt(tong)} cho ${rows.length} thợ?\nGhi sổ: chi phí thưởng (giảm lãi), tiền ra khỏi két.`,()=>{
+    try{beginOp();DB.thuongTra=DB.thuongTra||[];
+      rows.forEach(({t,con})=>{ghi(_thuongDienGiai(t.ten),[{tk:TK.RO_CHUNG,chieu:'NO',soTien:con},{tk:TK.QUY,chieu:'CO',soTien:con}]);
+        DB.thuongTra.push({id:uid(),ym:nsYm,thoId:t.id,tien:con,ngay:now()});});
+      Store.save();render();closeSheet();toast('Đã trả & ghi sổ toàn bộ thưởng.');}catch(e){toast(e.message,true)}
+  },{ok:'Trả tất cả'});}
+/* ---- TAB 3: MỤC TIÊU ---- */
+function nsAgg(from,to){const workers=DB.tho.filter(t=>!t.isOwner);let diem=0,cai=0,phe=0,thoLam=0,tongNgay=0;
+  workers.forEach(t=>{const k=nsKy(t.id,from,to);diem+=k.diem;cai+=k.cai;phe+=k.phe;tongNgay+=k.ngayCong;if(k.ngayCong>0||k.cai>0)thoLam++;});
+  const tyle=(cai+phe)>0?phe/(cai+phe)*100:0;return {diem,cai,phe,thoLam,tongNgay,tyle};}
+function nsKpiRow(label,curTxt,delta,goodUp,note){const arrow=delta>0?'▲':delta<0?'▼':'▬';
+  const good=(delta>0&&goodUp)||(delta<0&&!goodUp);const col=(delta===0||goodUp===null)?'var(--ink-3)':(good?'var(--brand)':'var(--thread)');
+  return `<div class="kv"><div class="k">${label}${note?`<br><small style="color:var(--ink-3)">${note}</small>`:''}</div>
+    <div class="v" style="text-align:right"><b>${curTxt}</b> <span style="font-size:11px;color:${col}">${arrow}</span></div></div>`;}
+function nsTabMucTieu(){const {from,to}=nsMonthRange(nsYm);const pym=nsPrevYm(nsYm);const pr=nsMonthRange(pym);
+  const cur=nsAgg(from,to);const prev=nsAgg(pr.from,pr.to);
+  const workers=DB.tho.filter(t=>!t.isOwner);
+  const thuongKy=sum(workers.map(t=>daTraThuong(nsYm,t.id)));
+  const dCai=cur.cai-prev.cai;
+  let h=nsKyNav();
+  h+=`<div class="hint" style="margin:-2px 0 12px">Bảng điểm: chính sách thưởng có kéo được các chỉ số không. Mũi tên so với ${nsYmLabel(pym).toLowerCase()}.</div>`;
+  h+=`<div class="card"><div class="card-pad">`;
+  h+=nsKpiRow('Tổng cái ra hàng',sepStr(cur.cai)+' cái',dCai,true);
+  h+=nsKpiRow('Tổng điểm năng suất',sepStr(cur.diem),cur.diem-prev.diem,true);
+  h+=nsKpiRow('Tổng ngày công (đi làm đều)',cur.tongNgay+' ngày',cur.tongNgay-prev.tongNgay,true);
+  h+=nsKpiRow('Số thợ có làm',cur.thoLam+' người',cur.thoLam-prev.thoLam,true);
+  h+=nsKpiRow('Tỉ lệ phế toàn xưởng',cur.tyle.toFixed(1)+'%',cur.tyle-prev.tyle,false);
+  h+=`</div></div>`;
+  h+=`<div class="section-h" style="margin-top:4px">Thưởng có đáng tiền không</div><div class="card"><div class="card-pad">`;
+  h+=nsKpiRow('Tiền thưởng đã chi',fmt(thuongKy),thuongKy-sum(workers.map(t=>daTraThuong(pym,t.id))),null);
+  if(thuongKy>0){const perK=dCai/(thuongKy/1000);
+    h+=`<div class="kv"><div class="k">Hiệu quả thưởng<br><small style="color:var(--ink-3)">cái tăng thêm so tháng trước ÷ tiền thưởng</small></div>
+      <div class="v" style="text-align:right"><b style="color:${dCai>0?'var(--brand)':'var(--thread)'}">${dCai>0?'+':''}${perK.toFixed(1)} cái</b><br><small style="color:var(--ink-3)">mỗi 1.000đ thưởng</small></div></div>`;
+  } else {h+=`<div class="hint" style="margin:6px 0 0">Chưa chi thưởng tháng này nên chưa tính được hiệu quả.</div>`;}
+  h+=`</div></div>`;
+  h+=`<div class="hint">Gợi ý: chạy quan sát vài tuần để biết mức bình thường, rồi vào tab Thưởng đặt mốc quanh mức đó — đặt quá cao không ai đạt, quá thấp thì tốn tiền mà hành vi không đổi.</div>`;
+  return h;}
+/* ---- Chi tiết năng suất: từng dòng góp vào mỗi chỉ số (bấm vào chỉ số để xem) ---- */
+function nsChiTietRows(thoId){const out=[];
+  DB.phieuGiao.filter(p=>p.thoId===thoId&&p.trangThai!=='HUY').forEach(p=>{const don=getDon(p.donId);
+    (p.dongNhan||[]).forEach(x=>{const bc=batchCds(p,x);
+      const sl=sum(Object.values(x.dat||{}));const phe=sum(Object.values(x.phe||{}));
+      if(sl<=0&&phe<=0)return;
+      out.push({ngay:x.ngay,ma:don?don.ma:'—',mo:tenCds(don,bc),
+        soCai:sl,tien:sl*donGiaCds(don,bc),diem:sl*diemCds(don,bc),phe,laGio:false});});});
+  DB.phienGio.filter(x=>x.thoId===thoId).forEach(pg=>{const don=getDon(pg.donId);
+    out.push({ngay:pg.ngay,ma:don?don.ma:'—',mo:'Công giờ '+pg.gio+'h',
+      soCai:0,tien:pg.tien,diem:0,phe:0,laGio:true,gio:pg.gio});});
+  out.sort((a,b)=>b.ngay-a.ngay);return out;}
+function modalNSChiTiet(thoId,kind){const t=getTho(thoId);const ns=nangSuat(thoId);
+  const K={
+    cai :{t:'Tổng số cái đã làm',tot:sepStr(ns.tongCai)+' cái',   keep:r=>r.soCai>0, fv:r=>sepStr(r.soCai)+' cái'},
+    tien:{t:'Tổng tiền công',    tot:fmt(ns.tongCong),            keep:r=>r.tien!==0, fv:r=>fmt(r.tien)},
+    diem:{t:'Điểm năng suất',    tot:sepStr(ns.tongDiem)+' điểm', keep:r=>r.diem>0,  fv:r=>sepStr(r.diem)+' điểm'},
+    phe :{t:'Hàng phế',          tot:sepStr(ns.tongPhe)+' cái',   keep:r=>r.phe>0,   fv:r=>sepStr(r.phe)+' cái'},
+    gio :{t:'Tổng giờ',          tot:(ns.tongGio||0)+' giờ',      keep:r=>r.laGio,   fv:r=>(r.gio||0)+' h'}
+  }[kind]||{t:'Chi tiết',tot:'',keep:()=>true,fv:r=>''};
+  const rows=nsChiTietRows(thoId).filter(K.keep);
+  let h=`<div class="reveal" style="background:linear-gradient(160deg,#2F7A63,#256452);margin-bottom:12px"><div class="lbl" style="color:#CDEBE0">${K.t} — tổng cộng</div><div class="amt">${K.tot}</div></div>`;
+  if(!rows.length){h+=`<div class="divider-note" style="padding:16px">Chưa có mục nào.</div>`;openSheet(K.t+' · '+t.ten,h);return;}
+  const nhom=[];rows.forEach(r=>{let g=nhom.find(x=>x.ma===r.ma);if(!g){g={ma:r.ma,lines:[]};nhom.push(g);}g.lines.push(r);});
+  nhom.forEach(g=>{h+=`<div class="card" style="margin-bottom:10px"><div class="card-pad"><b style="font-size:14px">${escHtml(g.ma)}</b>`;
+    g.lines.forEach(r=>{h+=`<div style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:13px">
+      <span style="flex:1;min-width:0;color:var(--ink-2)">${escHtml(r.mo)}${(kind==='tien'&&r.soCai)?` · ${sepStr(r.soCai)} cái`:''}</span>
+      <b style="white-space:nowrap;text-align:right">${K.fv(r)}</b></div>`;});
+    h+=`</div></div>`;});
+  openSheet(K.t+' · '+t.ten,h);}
 function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
   if(t.isOwner){openSheet(t.ten,`
     <div class="card"><div class="card-pad">
@@ -4222,11 +4506,13 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
       <div class="kv"><div class="k">Công đã tính sổ</div><div class="v">${roi.length} mục</div></div></div></div>`;}
   h+=`<div class="act-grid"><button class="btn btn-ghost" onclick="modalSoCongTho('${id}')">📋 Sổ công của thợ</button>
     <button class="btn btn-tape" onclick="modalChotSo('${id}')">🧾 Chốt sổ</button></div>`;
+  const chev='<span style="color:var(--ink-3);margin-left:4px">›</span>';
   h+=`<div class="section-h">Năng suất</div><div class="card"><div class="card-pad">
-    <div class="kv"><div class="k">Tổng số cái đã làm</div><div class="v">${ns.tongCai} cái</div></div>
-    ${ns.tongGio?`<div class="kv"><div class="k">Tổng giờ</div><div class="v">${ns.tongGio} giờ</div></div>`:''}
-    <div class="kv"><div class="k">Tổng tiền công</div><div class="v">${fmt(ns.tongCong)}</div></div>
-    <div class="kv"><div class="k">Hàng phế</div><div class="v ${ns.tongPhe>0?'money-neg':''}">${ns.tongPhe} cái</div></div></div></div>`;
+    <div class="kv" style="cursor:pointer" onclick="modalNSChiTiet('${id}','cai')"><div class="k">Tổng số cái đã làm</div><div class="v">${sepStr(ns.tongCai)} cái${chev}</div></div>
+    ${ns.tongGio?`<div class="kv" style="cursor:pointer" onclick="modalNSChiTiet('${id}','gio')"><div class="k">Tổng giờ</div><div class="v">${ns.tongGio} giờ${chev}</div></div>`:''}
+    <div class="kv" style="cursor:pointer" onclick="modalNSChiTiet('${id}','tien')"><div class="k">Tổng tiền công</div><div class="v">${fmt(ns.tongCong)}${chev}</div></div>
+    <div class="kv" style="cursor:pointer" onclick="modalNSChiTiet('${id}','diem')"><div class="k">Điểm năng suất</div><div class="v">${sepStr(ns.tongDiem)} điểm${chev}</div></div>
+    <div class="kv" style="cursor:pointer" onclick="modalNSChiTiet('${id}','phe')"><div class="k">Hàng phế</div><div class="v ${ns.tongPhe>0?'money-neg':''}">${ns.tongPhe} cái${chev}</div></div></div></div>`;
   h+=`<div class="hint" style="text-align:center;margin:4px 0 12px">Lương tự cộng từ số hàng thợ trả về — không cộng tay.</div>`;
   h+=srSectionHtml(id);
   h+=`<button class="btn btn-ghost" onclick="modalSuaTho('${id}')">✎ Sửa thông tin thợ</button>`;
@@ -4776,7 +5062,7 @@ function srSectionHtml(thoId){
   const D=srBuildRows(thoId); const {ky,rg,rows,thu,chi,con,psTot,rowsSR}=D;
   let h=`<div class="section-h">Sổ thu chi riêng <span style="text-transform:none;letter-spacing:0;font-weight:600;color:var(--ink-3)">· không tính vào xưởng</span></div>`;
   h+=perBar(ky,_srRef,'srSetKy','srNav',`,'${thoId}'`);
-  h+=miniThuChi(rg.from,rg.to,rowsSR.map(r=>({t:r.ngay,thu:r.sign>0?r.amount:0,chi:r.sign<0?r.amount:0})),{thuLbl:'Thu ngoài',chiLbl:'Chi ngoài'});
+  h+=miniThuChi(rg.from,rg.to,rowsSR.map(r=>({t:r.ngay,thu:r.sign>0?r.amount:0,chi:r.sign<0?r.amount:0})),{thuLbl:'Thu ngoài',chiLbl:'Chi ngoài',pager:ky==='tuy'?{id:'sr_'+thoId,reCall:`modalThoChiTiet('${thoId}')`}:null});
   const kvTap=(cat,k,v,vcls,extra)=>`<div class="kv" style="cursor:pointer" onclick="modalSrCat('${thoId}','${cat}')">
     <div class="k">${k}${extra||''}</div><div class="v" style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span class="${vcls}">${v}</span><span style="color:var(--ink-3)">›</span></div></div>`;
   h+=`<div class="card" style="border:1.5px solid var(--sage)"><div class="card-pad">
@@ -5313,7 +5599,7 @@ function modalKhoMau(){const ks=dsMauSan();
     :`<div class="divider-note" style="padding:14px">Chưa có mẫu sẵn nào.</div>`;
   h+=`</div><button class="btn btn-primary" onclick="modalThemMauSan()">＋ Thêm mẫu sẵn</button>`;
   openSheet('Kho mẫu sẵn ('+ks.length+')',h);}
-function modalThemMauSan(veChu){cdEdit=[{ten:'',donGia:0,canTruoc:[],giaiDoan:null}];msCtx={id:'',sizeList:SIZES.slice(),veChu:veChu||''};drawMauSanForm('','',0,0);}
+function modalThemMauSan(veChu){cdEdit=[{ten:'',donGia:0,diem:0,canTruoc:[],giaiDoan:null}];msCtx={id:'',sizeList:SIZES.slice(),veChu:veChu||''};drawMauSanForm('','',0,0);}
 function modalSuaMauSan(id){const k=getMauSan(id);if(!k)return;cdEdit=(k.congDoan||[]).map(c=>({...c,canTruoc:migCT(c.canTruoc)}));
   msCtx={id,sizeList:(k.sizeList&&k.sizeList.length)?k.sizeList.slice():SIZES.slice()};
   drawMauSanForm(id,k.ten,k.gioDinhMuc||0,k.giaGiaCong||0);}
@@ -5326,9 +5612,12 @@ function msTabBar(active){
 function msTab(v){const cur=(msCtx&&msCtx.view)||'form';if(v===cur)return;if(v==='dk')modalDKMauSan();else if(v==='neo')modalNeoMauSan();else dkXong();}
 function drawMauSanForm(id,ten,gio,gia){
   msCtx.ten=ten||'';msCtx.view='form';
-  const rows=cdEdit.map((c,i)=>`<div class="sizegrid" style="grid-template-columns:2fr 1.3fr auto;gap:6px;margin-bottom:6px">
-    <input placeholder="Tên công đoạn ${i+1}" value="${c.ten}" oninput="cdEdit[${i}].ten=this.value" style="padding:10px;border:1.5px solid var(--line);border-radius:10px;font-weight:600">
-    <input type="text" inputmode="numeric" class="sep" placeholder="Đơn giá" value="${sepStr(c.donGia)}" oninput="cdEdit[${i}].donGia=numOf(this)" style="padding:10px;border:1.5px solid var(--line);border-radius:10px;font-weight:600;text-align:right">
+  const cdHead=`<div class="sizegrid" style="grid-template-columns:1.5fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:10.5px;color:var(--ink-3);font-weight:700;letter-spacing:.02em">
+    <div>Công đoạn</div><div style="text-align:right">Đơn giá</div><div style="text-align:right">Điểm</div><div style="min-width:26px"></div></div>`;
+  const rows=cdHead+cdEdit.map((c,i)=>`<div class="sizegrid" style="grid-template-columns:1.5fr 1fr 1fr auto;gap:6px;margin-bottom:6px">
+    <input placeholder="Tên công đoạn ${i+1}" value="${c.ten}" oninput="cdEdit[${i}].ten=this.value" style="padding:10px 8px;border:1.5px solid var(--line);border-radius:10px;font-weight:600">
+    <input type="text" inputmode="numeric" class="sep" placeholder="Đơn giá" value="${sepStr(c.donGia)}" oninput="cdEdit[${i}].donGia=numOf(this)" style="padding:10px 8px;border:1.5px solid var(--line);border-radius:10px;font-weight:600;text-align:right">
+    <input type="text" inputmode="numeric" class="sep" placeholder="Điểm" value="${c.diem?sepStr(c.diem):''}" oninput="cdEdit[${i}].diem=numOf(this)" style="padding:10px 8px;border:1.5px solid var(--line);border-radius:10px;font-weight:600;text-align:right">
     <button class="mini-btn" style="align-self:center" onclick="cdEdit.splice(${i},1);redrawMauSan()">✕</button></div>`).join('');
   openSheet(ten?escHtml(ten):(id?'Sửa mẫu sẵn':'Thêm mẫu sẵn'),`
     ${msTabBar('form')}
@@ -5339,7 +5628,7 @@ function drawMauSanForm(id,ten,gio,gia){
     <div class="field"><label>Giá gia công gợi ý / 1 cái</label><input type="text" inputmode="numeric" class="sep" id="ms_gia" value="${sepStr(gia)}">
       <div class="hint">Chỉ là số gợi ý — mỗi chủ hàng trả khác nhau thì sửa lại lúc thêm mẫu.</div></div>
     <div class="field"><label>Công đoạn & đơn giá công/cái</label>${rows}
-      <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:4px" onclick="cdEdit.push({ten:'',donGia:0,canTruoc:[],giaiDoan:null});redrawMauSan()">＋ Thêm công đoạn</button></div>
+      <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:4px" onclick="cdEdit.push({ten:'',donGia:0,diem:0,canTruoc:[],giaiDoan:null});redrawMauSan()">＋ Thêm công đoạn</button></div>
     <div class="field"><label>Giờ định mức / 100 cái (nếu có khâu tính giờ)</label><input type="number" id="ms_gio" value="${gio||0}" step="0.1"></div>
     ${id?`<div class="hint" style="margin-bottom:10px">Sửa ở đây <b>không</b> đổi mẫu đã tạo cho chủ hàng — mẫu bên đó là bản riêng, đơn đang chạy vẫn giữ giá cũ.</div>
       <button class="btn btn-danger" style="margin-bottom:10px" onclick="doXoaMauSan('${id}')">Xóa mẫu sẵn này</button>`:''}
@@ -5422,7 +5711,7 @@ function submitMauSan(id){const ten=((el('ms_ten')?el('ms_ten').value:(msCtx.ten
   const keep=cdEdit.map((c,i)=>({c,i})).filter(o=>o.c.ten.trim()&&o.c.donGia>0);
   if(!keep.length)return toast('Thêm ít nhất một công đoạn có giá.',true);
   const o2n={};keep.forEach((o,ni)=>{o2n[o.i]=ni;});
-  const cd=keep.map(o=>({ten:o.c.ten.trim(),donGia:o.c.donGia,giaiDoan:normGD(o.c.giaiDoan),
+  const cd=keep.map(o=>({ten:o.c.ten.trim(),donGia:o.c.donGia,diem:o.c.diem||0,giaiDoan:normGD(o.c.giaiDoan),
     canTruoc:normCT(o.c.canTruoc).map(g=>g.map(x=>o2n[x]).filter(x=>x!==undefined&&x!==o2n[o.i])).filter(g=>g.length)}));
   const gio=el('ms_gio')?(+el('ms_gio').value||0):(msCtx.gio||0),gia=el('ms_gia')?numVal('ms_gia'):(msCtx.gia||0);
   const sizeList=(msCtx.sizeList&&msCtx.sizeList.length)?msCtx.sizeList:SIZES.slice();
@@ -5504,7 +5793,7 @@ function navBack(){
 }
 function navCloseAll(){_nav=[];_hardClose();}   /* đóng hết sheet, về màn nền (dùng sau khi ghi xong) */
 function _hardClose(){el('scrim').classList.remove('on');_nvBackTo=null;_sheetClose=null;}
-const _NAV_FRAMES=['modalDon','modalTaoDon','modalGiaoViec','modalNhanVe','modalChamGio','modalChiPhiDon','modalGiaoXe','modalTienDen','modalXinCham','modalChamVe','modalThao','modalGiaoTP','modalChuHang','modalThuChuHang','modalThuTien','modalSuaKhoan','modalNoXau','modalChiPhi','modalRutVon','modalBoVon','modalGhiBoSung','modalGhiTien','modalSoCong','modalChotLuong','modalSoCongTho','modalChotSo','modalThoChiTiet','modalTraLuong','modalUng','modalPhatSinhTho','modalSuaPhatSinh','modalSuaDonLS','modalSuaDon','modalOp','modalChonChuThu','modalCaiDat','modalPhucHoi','modalThemChu','modalSuaChu','modalThemTho','modalSuaTho','modalThemMau','modalSuaMau','modalKhoMau','modalThemMauSan','modalSuaMauSan','modalDKMauSan','modalNeoMauSan','modalDauKy','moNhanNhanh','doDongDon','confirmDongDon','confirmHuyDon','confirmTraLai','confirmTraHet','confirmXoaDon','confirmXoaHanDon','kmChot','mcOpen','exportModal','hoiLanTruyen','moKetNoiDamMay','openSoKeToan','askDao','ltDetail','modalSoRieng','modalLaiDon','modalLaiLichSu','modalChiPhiXong','modalThemMucCoDinh','modalLo','modalLaiLo','modalChiPhiLo','modalNgayNghiBao','modalDoiMocBao','modalKet','modalNapQuyChi','modalTraQuyChi','modalQuyChiTiet','modalDieuChinhQuy','modalKhoanReadOnly','modalSrCat','nvXong'];
+const _NAV_FRAMES=['modalDon','modalTaoDon','modalGiaoViec','modalNhanVe','modalChamGio','modalChiPhiDon','modalGiaoXe','modalTienDen','modalXinCham','modalChamVe','modalThao','modalGiaoTP','modalChuHang','modalThuChuHang','modalThuTien','modalSuaKhoan','modalNoXau','modalChiPhi','modalRutVon','modalBoVon','modalGhiBoSung','modalGhiTien','modalSoCong','modalChotLuong','modalSoCongTho','modalChotSo','modalThoChiTiet','modalNangSuatXep','modalNSChiTiet','modalThuongCfg','modalTraThuongKy','modalTraLuong','modalUng','modalPhatSinhTho','modalSuaPhatSinh','modalSuaDonLS','modalSuaDon','modalOp','modalChonChuThu','modalCaiDat','modalPhucHoi','modalThemChu','modalSuaChu','modalThemTho','modalSuaTho','modalThemMau','modalSuaMau','modalKhoMau','modalThemMauSan','modalSuaMauSan','modalDKMauSan','modalNeoMauSan','modalDauKy','moNhanNhanh','doDongDon','confirmDongDon','confirmHuyDon','confirmTraLai','confirmTraHet','confirmXoaDon','confirmXoaHanDon','kmChot','mcOpen','exportModal','hoiLanTruyen','moKetNoiDamMay','openSoKeToan','askDao','ltDetail','modalSoRieng','modalLaiDon','modalLaiLichSu','modalChiPhiXong','modalThemMucCoDinh','modalLo','modalLaiLo','modalChiPhiLo','modalNgayNghiBao','modalDoiMocBao','modalKet','modalNapQuyChi','modalTraQuyChi','modalQuyChiTiet','modalDieuChinhQuy','modalKhoanReadOnly','modalSrCat','nvXong'];
 function _installNavFrames(){_NAV_FRAMES.forEach(name=>{const orig=window[name];
   if(typeof orig!=='function'||orig._wrapped)return;
   const w=function(){const a=Array.prototype.slice.call(arguments);_frame(name,a);return orig.apply(this,a);};
@@ -5809,6 +6098,8 @@ const EDIT_FNS=new Set([
  'modalPhatSinhTho','submitPhatSinhTho','submitSuaPhatSinh','askXoaPhatSinh','modalChamGio','submitChamGio','modalChamVe','submitChamVe',
  'modalXinCham','submitXinCham','modalNgayNghiBao','submitNghiBao','delNghiBao','modalDoiMocBao','submitMocBao','submitChotSoBao','submitChotSoSP',
  'nvToggleHu','nvXong','nvQuayLai','nvNhanGiuMo','nvDelLo','nvChonTraVe','nvChonGiu','nvChonBoLuon','nvAddLo','xoaGiaoCong','msChiLuu','msCapNhatCa',
+ // thưởng năng suất
+ 'modalThuongCfg','submitThuongCfg','modalTraThuongKy','traThuongTho','doTraThuong','traThuongTatCa',
  // mẫu / mục cố định
  'modalThemMau','modalSuaMau','submitMau','doXoaMau','modalThemMauSan','modalSuaMauSan','submitMauSan','doXoaMauSan','mauXoaAnh',
  'modalThemMucCoDinh','submitMucCoDinh','xoaMucCoDinhUI',
