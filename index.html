@@ -5267,6 +5267,54 @@ function suaDon({donId,mauId,ma,sizes,giaGiaCong}){
   if(giaGiaCong!=null&&giaGiaCong>0)don.giaGiaCong=giaGiaCong;
   Store.save();
 }
+/* ===== ĐỔI MẪU cho đơn ĐÃ có phát sinh: làm mới toàn bộ giao/nhận/chấm (GIỮ chi phí lô) rồi nạp mẫu mới =====
+   Nguyên tắc: bỏ trọn từng bút toán công/giờ/tháo/chung của đơn (mỗi bút toán vốn đã cân → Σ Nợ=Có & cầu nối giữ);
+   giữ lại các khoản dính QUỸ (chi phí lô đã chi tiền thật). Chặn nếu đơn đã giao TP / đã thu tiền / dính kỳ khóa. */
+function _btDon(donId){return DB.butToan.filter(bt=>bt.dong.some(d=>d.donId===donId));}
+function _btDonReset(donId){return _btDon(donId).filter(bt=>!bt.dong.some(d=>d.tk===TK.QUY));}
+function donDoiMauDuoc(donId){const don=getDon(donId);
+  if(['DA_GIAO_DU','DA_HUY','BI_TRA_LAI','DA_GIAO_MOT_PHAN'].includes(don.trangThai))
+    return {ok:false,ly:'Đơn đã giao thành phẩm/đóng/hủy — không đổi mẫu.'};
+  if((DB.giaoTP||[]).some(g=>g.donId===donId)||donDaThuTien(donId))
+    return {ok:false,ly:'Đơn đã giao thành phẩm/đã thu tiền — không đổi mẫu.'};
+  if(DB.settings.kyKhoa&&DB.settings.kyKhoaTime&&_btDonReset(donId).some(bt=>bt.thoiDiem<=DB.settings.kyKhoaTime))
+    return {ok:false,ly:'Có ghi chép trong kỳ đã khóa sổ — không đổi mẫu.'};
+  return {ok:true,ly:''};}
+function doiMauTomTat(donId){const congTho={};let chung=0,chiLo=0;
+  _btDon(donId).forEach(bt=>{
+    if(bt.dong.some(d=>d.tk===TK.QUY)){bt.dong.forEach(d=>{if(d.tk===TK.WIP&&d.donId===donId&&d.chieu==='NO')chiLo+=d.soTien;});return;}
+    bt.dong.forEach(d=>{const s=(d.chieu==='CO'?d.soTien:-d.soTien);
+      if(d.tk===TK.PHAI_TRA_THO)congTho[d.thoId]=(congTho[d.thoId]||0)+s;
+      else if(d.tk===TK.CONG_CHU_XUONG)congTho['__me']=(congTho['__me']||0)+s;
+      else if(d.tk===TK.RO_CHUNG)chung+=s;});});
+  return {congTho,chung,chiLo};}
+function doiMauLamMoi(donId,mauId){const can=donDoiMauDuoc(donId);if(!can.ok)throw new Error(can.ly);
+  const don=getDon(donId);const mau=getMau(mauId);if(!mau)throw new Error('Không thấy mẫu.');
+  const rm=new Set(_btDonReset(donId).map(b=>b.id));
+  DB.butToan=DB.butToan.filter(b=>!rm.has(b.id));
+  DB.phieuGiao=DB.phieuGiao.filter(p=>p.donId!==donId);
+  DB.phienGio=(DB.phienGio||[]).filter(s=>s.donId!==donId);
+  DB.phieuThao=(DB.phieuThao||[]).filter(t=>t.donId!==donId);
+  don.chamList=[];don.trangThai='DANG_CHAY';
+  don.mauId=mauId;
+  don.snapshotCD=mau.congDoan.map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));
+  don.sizeList=(mau.sizeList&&mau.sizeList.length)?mau.sizeList.slice():SIZES.slice();
+  don.gioDinhMuc=mau.gioDinhMuc||0;don.giaGiaCong=mau.giaGiaCong||don.giaGiaCong;
+  const ns={};don.sizeList.forEach(x=>ns[x]=don.sizes[x]||0);don.sizes=ns;
+  Store.save();}
+function sdMauReset(donId,mauId){const don=getDon(donId);if(mauId===don.mauId)return;
+  const can=donDoiMauDuoc(donId);if(!can.ok)return toast(can.ly,true);
+  const mau=getMau(mauId);const t=doiMauTomTat(donId);
+  let dsCong=Object.keys(t.congTho).filter(k=>Math.abs(t.congTho[k])>0)
+    .map(k=>'• '+(k==='__me'?'Công của mình':((getTho(k)&&getTho(k).ten)||'thợ'))+': '+fmt(Math.abs(t.congTho[k]))).join('\n');
+  if(!dsCong)dsCong='• (chưa có công thợ đã nhận)';
+  const msg='Đổi sang mẫu «'+mau.ten+'».\n\n'
+    +'Đơn đã có việc. Đổi mẫu sẽ XÓA toàn bộ giao/nhận/chấm đã nhập (coi như chưa phát sinh) để nhập lại từ đầu:\n'
+    +dsCong+(t.chung?'\n• Chi phí chung đã phân bổ: '+fmt(Math.abs(t.chung)):'')
+    +'\n\nGIỮ nguyên chi phí lô đã chi: '+fmt(t.chiLo)+'.'
+    +'\n\n⚠️ Nợ lương của các việc trên sẽ bị xóa — nhớ nhập lại sau khi đổi. Nếu bạn ĐÃ trả lương cho các việc này thì đừng đổi (số sẽ lệch).';
+  xacNhan(msg,()=>{try{doiMauLamMoi(donId,mauId);closeSheet();render();modalDon(donId);toast('Đã đổi mẫu & làm mới đơn.');}catch(e){toast(e.message,true)}},
+    {ok:'Đổi mẫu & làm mới',nguyHiem:true,title:'Đổi mẫu'});}
 function xoaDon(donId){if(donCoPhatSinh(donId))throw new Error('Đơn đã có phát sinh — dùng "Hủy đơn" thay vì xóa.');
   DB.don=DB.don.filter(d=>d.id!==donId);Store.save();}
 /* ---- Xóa HẲN đơn đã hủy (thao tác nhầm) ----
@@ -5301,7 +5349,12 @@ function modalSuaDon(donId){const don=getDon(donId);const chu=getChu(don.chuHang
   openSheet('Sửa đơn — '+don.ma,`
     <div class="field"><label>Mã đơn</label><input id="sd_ma" value="${don.ma}"></div>
     <div class="field"><label>Mẫu</label>
-      ${coPS?`<div class="hint" style="margin:0 0 4px">Đơn đã có phát sinh — không đổi mẫu được.</div><input value="${escHtml(getMau(don.mauId).ten)}" disabled>`:`<div class="chipset">${mauList.map(m=>`<div class="chip ${m.id===don.mauId?'sel':''}" onclick="sdMau('${donId}','${m.id}')">${escHtml(m.ten)}</div>`).join('')}</div>`}</div>
+      ${(()=>{const can=coPS?donDoiMauDuoc(donId):{ok:true};
+        if(coPS&&!can.ok)return `<div class="hint" style="margin:0 0 4px">${can.ly}</div><input value="${escHtml((getMau(don.mauId)||{ten:'(mẫu cũ)'}).ten)}" disabled>`;
+        const fn=coPS?'sdMauReset':'sdMau';
+        return `<div class="chipset">${mauList.map(m=>`<div class="chip ${m.id===don.mauId?'sel':''}" onclick="${fn}('${donId}','${m.id}')">${escHtml(m.ten)}</div>`).join('')}</div>`
+          +(coPS?`<div class="hint">Đơn đã có việc — đổi mẫu sẽ <b>làm mới</b> toàn bộ giao/nhận đã nhập (giữ chi phí lô), rồi nhập lại theo mẫu mới.</div>`:'');
+      })()}</div>
     <div class="field"><label>Số cái theo cỡ</label>
       <div class="sizegrid">${sizeList.map(x=>`<div class="sizecell"><label>${x}</label><input type="number" min="0" id="sd_${x}" value="${don.sizes[x]||0}" onfocus="this.select()"></div>`).join('')}</div>
       <div class="hint">Không giảm dưới số đã đưa vào sản xuất.</div></div>
