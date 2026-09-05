@@ -716,7 +716,7 @@ function taoDon({chuHangId,mauId,ma,sizes,giaGiaCong,maLo}){
   const mau=getMau(mauId);
   const sizeList=(mau.sizeList&&mau.sizeList.length)?mau.sizeList.slice():SIZES.slice();
   const don={id:uid(),ma,chuHangId,mauId,ngay:now(),sizes:{...sizes},giaGiaCong,sizeList,maLo:maLo||ma||'',
-    snapshotCD:mau.congDoan.map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)})),
+    snapshotCD:mau.congDoan.map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,nhom:c.nhom||null,nhomId:c.nhomId||null,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)})),
     gioDinhMuc:mau.gioDinhMuc||0,chamList:[],trangThai:'DANG_CHAY'};
   DB.don.push(don);Store.save();return don;
 }
@@ -1200,12 +1200,12 @@ function getMauSan(id){return dsMauSan().find(x=>x.id===id);}
 function themMauSan(o){const m={id:uid(),ten:(o.ten||'').trim(),
   sizeList:(o.sizeList&&o.sizeList.length)?o.sizeList.slice():SIZES.slice(),
   giaGiaCong:o.giaGiaCong||0,gioDinhMuc:o.gioDinhMuc||0,
-  congDoan:(o.congDoan||[]).map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)})),soLan:0,ngay:now()};
+  congDoan:(o.congDoan||[]).map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,nhom:c.nhom||null,nhomId:c.nhomId||null,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)})),soLan:0,ngay:now()};
   dsMauSan().push(m);Store.save();return m;}
 function suaMauSan(id,o){const m=getMauSan(id);if(!m)return;
   m.ten=(o.ten||'').trim();m.sizeList=(o.sizeList&&o.sizeList.length)?o.sizeList.slice():SIZES.slice();
   m.giaGiaCong=o.giaGiaCong||0;m.gioDinhMuc=o.gioDinhMuc||0;
-  m.congDoan=(o.congDoan||[]).map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));Store.save();}
+  m.congDoan=(o.congDoan||[]).map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,nhom:c.nhom||null,nhomId:c.nhomId||null,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));Store.save();}
 function xoaMauSan(id){DB.mauSan=dsMauSan().filter(x=>x.id!==id);Store.save();}
 function dungMauSan(id){const m=getMauSan(id);if(m){m.soLan=(m.soLan||0)+1;Store.save();}}
 /* ---- Lan truyền khi SỬA mẫu sẵn ----
@@ -1231,7 +1231,7 @@ function mauChuTheoKho(presetId,tenCu){
    công đoạn mới lấy giá từ mẫu sẵn. */
 function tronCongDoan(cur,neuCD){
   return neuCD.map(n=>{const cu=(cur||[]).find(c=>c.ten===n.ten);
-    return {ten:n.ten,donGia:cu?cu.donGia:n.donGia,diem:n.diem||0};});
+    return {ten:n.ten,donGia:cu?cu.donGia:n.donGia,diem:n.diem||0,nhom:n.nhom||null,nhomId:n.nhomId||null};});
 }
 function anhHuongMauSan(presetId,tenCu,neuCD,neuGio){
   const ke={mau:[],donDoi:[],donGiu:[]};
@@ -1253,7 +1253,7 @@ function apDungLanTruyen(ke){
     m.lichSuGia.push({ngay:now(),congDoan:it.merged.map(c=>({...c})),theoKho:true});
   }
   for(const it of ke.donDoi){const d=it.don;
-    d.snapshotCD=it.merged.map(c=>({ten:c.ten,donGia:c.donGia,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));
+    d.snapshotCD=it.merged.map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,nhom:c.nhom||null,nhomId:c.nhomId||null,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));
     d.gioDinhMuc=it.gio;
   }
   Store.save();
@@ -5257,7 +5257,7 @@ function suaDon({donId,mauId,ma,sizes,giaGiaCong}){
   if(don.trangThai==='DA_GIAO_DU'||don.trangThai==='DA_HUY')throw new Error('Đơn đã đóng/hủy — không sửa được.');
   if(mauId&&mauId!==don.mauId){
     if(donCoPhatSinh(donId))throw new Error('Đơn đã có phát sinh — không đổi mẫu. Hãy hủy và tạo đơn mới.');
-    const mau=getMau(mauId);don.mauId=mauId;don.snapshotCD=mau.congDoan.map(c=>({ten:c.ten,donGia:c.donGia,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));
+    const mau=getMau(mauId);don.mauId=mauId;don.snapshotCD=mau.congDoan.map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,nhom:c.nhom||null,nhomId:c.nhomId||null,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));
     don.sizeList=(mau.sizeList&&mau.sizeList.length)?mau.sizeList.slice():SIZES.slice();don.gioDinhMuc=mau.gioDinhMuc||0;
     don.giaGiaCong=mau.giaGiaCong||don.giaGiaCong;const ns={};don.sizeList.forEach(x=>ns[x]=don.sizes[x]||0);don.sizes=ns;}
   if(sizes){for(const x of Object.keys(sizes)){const q=sizes[x]||0;const daRa=daDungSize(don,x);
@@ -5297,7 +5297,7 @@ function doiMauLamMoi(donId,mauId){const can=donDoiMauDuoc(donId);if(!can.ok)thr
   DB.phieuThao=(DB.phieuThao||[]).filter(t=>t.donId!==donId);
   don.chamList=[];don.trangThai='DANG_CHAY';
   don.mauId=mauId;
-  don.snapshotCD=mau.congDoan.map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));
+  don.snapshotCD=mau.congDoan.map(c=>({ten:c.ten,donGia:c.donGia,diem:c.diem||0,nhom:c.nhom||null,nhomId:c.nhomId||null,canTruoc:normCT(c.canTruoc),giaiDoan:normGD(c.giaiDoan)}));
   don.sizeList=(mau.sizeList&&mau.sizeList.length)?mau.sizeList.slice():SIZES.slice();
   don.gioDinhMuc=mau.gioDinhMuc||0;don.giaGiaCong=mau.giaGiaCong||don.giaGiaCong;
   const ns={};don.sizeList.forEach(x=>ns[x]=don.sizes[x]||0);don.sizes=ns;
@@ -6056,7 +6056,7 @@ function submitTho(id){const ten=el('th_ten').value.trim();if(!ten)return toast(
   const patch={ten,loai,donGiaGio,donGiaNgay};if(ngayBatDau!==undefined)patch.ngayBatDau=ngayBatDau;
   if(id)suaTho(id,patch);else themTho(patch);closeSheet();render();toast('Đã lưu thợ.');}
 let cdEdit=[];let mauCtx={};
-function modalThemMau(chuId){cdEdit=[];mauCtx={chuId,id:'',sizeList:[],anh:'',tuKho:'',ten:'',gia:0,gio:0};drawMauForm();}
+function modalThemMau(chuId){msLive=false;cdEdit=[];mauCtx={chuId,id:'',sizeList:[],anh:'',tuKho:'',ten:'',gia:0,gio:0};drawMauForm();}
 function modalSuaMau(id){const m=getMau(id);const c=getMauChu(id);cdEdit=m.congDoan.map(x=>({...x}));
   mauCtx={chuId:c?c.id:null,id,sizeList:(m.sizeList&&m.sizeList.length)?m.sizeList.slice():SIZES.slice(),
     anh:m.anh||'',tuKho:m.tuKho||'',ten:m.ten||'',gia:m.giaGiaCong||0,gio:m.gioDinhMuc||0};
@@ -6153,19 +6153,118 @@ function apDungMauSan(v){mauCtx.tuKho=v||'';
   mauCtx.sizeList=(k.sizeList&&k.sizeList.length)?k.sizeList.slice():SIZES.slice();
   mauCtx.ten=k.ten;mauCtx.gia=k.giaGiaCong||0;mauCtx.gio=k.gioDinhMuc||0;
   drawMauForm();}
-function modalKhoMau(){const ks=dsMauSan();
+
+/* ================= DANH MỤC CÔNG ĐOẠN THEO NHÓM MÁY =================
+   Nguồn CHUẨN cho khai mẫu: chọn công đoạn từ đây, kéo theo tên+đơn giá+điểm.
+   Chỉ là danh mục (metadata) — KHÔNG sinh bút toán, không đụng kế toán. */
+let dmCtx={};
+function dmSeed(){return [
+  {id:uid(),ten:'Vắt sổ',cd:[]},
+  {id:uid(),ten:'1 kim',cd:[]},
+  {id:uid(),ten:'Kansai',cd:[
+    {id:uid(),ten:'Kansai tay',donGia:200,diem:1},
+    {id:uid(),ten:'Kansai cổ',donGia:300,diem:2}
+  ]},
+  {id:uid(),ten:'Thùa – đính',cd:[]},
+  {id:uid(),ten:'Cắt chỉ – hoàn thiện',cd:[]}
+];}
+function dmList(){if(!DB.dmNhom){DB.dmNhom=dmSeed();Store.save();}return DB.dmNhom;}
+function dmNhomGet(id){return dmList().find(n=>n.id===id)||null;}
+function dmCdGet(nhomId,cdId){const n=dmNhomGet(nhomId);return n?((n.cd||[]).find(c=>c.id===cdId)||null):null;}
+function dmThemNhom(ten){ten=(ten||'').trim();if(!ten)return null;const n={id:uid(),ten,cd:[]};dmList().push(n);Store.save();return n;}
+function dmSuaNhom(id,ten){const n=dmNhomGet(id);if(n){ten=(ten||'').trim();if(ten)n.ten=ten;Store.save();}}
+function dmXoaNhom(id){DB.dmNhom=dmList().filter(n=>n.id!==id);Store.save();}
+function dmThemCd(nhomId,o){const n=dmNhomGet(nhomId);if(!n)return;n.cd=n.cd||[];n.cd.push({id:uid(),ten:(o.ten||'').trim(),donGia:o.donGia||0,diem:o.diem||0});Store.save();}
+function dmSuaCd(nhomId,cdId,o){const c=dmCdGet(nhomId,cdId);if(!c)return;if(o.ten!=null){const t=(o.ten||'').trim();if(t)c.ten=t;}if(o.donGia!=null)c.donGia=o.donGia||0;if(o.diem!=null)c.diem=o.diem||0;Store.save();}
+function dmXoaCd(nhomId,cdId){const n=dmNhomGet(nhomId);if(n){n.cd=(n.cd||[]).filter(c=>c.id!==cdId);Store.save();}}
+
+function modalDanhMuc(){
+  const ns=dmList();
+  let h=`<div class="hint" style="margin:-4px 0 12px">Mỗi <b>nhóm máy</b> chứa các công đoạn chuẩn (tên · đơn giá · điểm). Khai mẫu thì chọn từ đây — không gõ tay nữa.</div>`;
+  h+= ns.length? ns.map(n=>{
+    const cds=((n.cd||[]).length?(n.cd||[]).map(c=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line-2)">
+        <div style="flex:1;min-width:0"><div style="font-weight:650;font-size:13.5px">${escHtml(c.ten)}</div>
+          <div style="font-size:11.5px;color:var(--ink-3);margin-top:1px">${fmt(c.donGia||0)}/cái · ${c.diem||0} điểm</div></div>
+        <button class="mini-btn" style="color:var(--ink-2)" onclick="modalCdForm('${n.id}','${c.id}')">✎</button>
+        <button class="mini-btn" onclick="dmDelCd('${n.id}','${c.id}')">✕</button>
+      </div>`).join(''):'<div class="hint" style="margin:6px 0 0">Nhóm này chưa có công đoạn nào.</div>');
+    return `<div class="card"><div class="card-pad">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+        <div style="flex:1;font-weight:800;font-size:15px">${escHtml(n.ten)} <span style="font-weight:600;color:var(--ink-3);font-size:12px">· ${(n.cd||[]).length} công đoạn</span></div>
+        <button class="mini-btn" style="color:var(--ink-2)" onclick="modalNhomForm('${n.id}')">✎ tên</button>
+        <button class="mini-btn" onclick="dmDelNhom('${n.id}')">✕</button>
+      </div>
+      ${cds}
+      <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:10px" onclick="modalCdForm('${n.id}','')">＋ Thêm công đoạn</button>
+    </div></div>`;
+  }).join('') : `<div class="divider-note" style="padding:14px">Chưa có nhóm máy nào.</div>`;
+  h+=`<button class="btn btn-primary" onclick="modalNhomForm('')">＋ Thêm nhóm máy</button>`;
+  openSheet('Danh mục công đoạn',h);
+}
+function dmDelNhom(id){const n=dmNhomGet(id);if(!n)return;xacNhan('Xóa nhóm «'+n.ten+'» và toàn bộ công đoạn trong đó?\n\nMẫu đã tạo trước đó KHÔNG bị ảnh hưởng.',()=>{dmXoaNhom(id);modalDanhMuc();toast('Đã xóa nhóm.');},{ok:'Xóa nhóm',nguyHiem:true,title:'Xóa nhóm máy'});}
+function dmDelCd(nhomId,cdId){const c=dmCdGet(nhomId,cdId);if(!c)return;xacNhan('Xóa công đoạn «'+c.ten+'» khỏi danh mục?',()=>{dmXoaCd(nhomId,cdId);modalDanhMuc();toast('Đã xóa công đoạn.');},{ok:'Xóa',nguyHiem:true,title:'Xóa công đoạn'});}
+
+function modalNhomForm(id){const n=id?dmNhomGet(id):null;dmCtx={nhomId:id||''};
+  openSheet(id?'Sửa tên nhóm':'Thêm nhóm máy',`
+    <div class="field"><label>Tên nhóm máy</label><input id="dm_nhom_ten" value="${n?escHtml(n.ten):''}" placeholder="VD: Kansai, Vắt sổ, 1 kim…"></div>
+    <button class="btn btn-primary" onclick="submitNhom('${id||''}')">Lưu</button>`);
+  setTimeout(()=>{const e=el('dm_nhom_ten');if(e)e.focus();},60);
+}
+function submitNhom(id){const ten=(el('dm_nhom_ten')?el('dm_nhom_ten').value:'').trim();if(!ten)return toast('Nhập tên nhóm.',true);
+  if(id)dmSuaNhom(id,ten);else dmThemNhom(ten);modalDanhMuc();toast('Đã lưu nhóm.');}
+
+function modalCdForm(nhomId,cdId){const n=dmNhomGet(nhomId);if(!n)return;const c=cdId?dmCdGet(nhomId,cdId):null;
+  openSheet((cdId?'Sửa công đoạn':'Thêm công đoạn')+' · '+escHtml(n.ten),`
+    <div class="field"><label>Tên công đoạn</label><input id="dm_cd_ten" value="${c?escHtml(c.ten):''}" placeholder="VD: Kansai cổ"></div>
+    <div class="field"><label>Đơn giá công / 1 cái</label><input type="text" inputmode="numeric" class="sep" id="dm_cd_gia" value="${c?sepStr(c.donGia||0):''}" placeholder="VD: 300"></div>
+    <div class="field"><label>Điểm</label><input type="text" inputmode="numeric" class="sep" id="dm_cd_diem" value="${c?sepStr(c.diem||0):''}" placeholder="VD: 2"></div>
+    <button class="btn btn-primary" onclick="submitCd('${nhomId}','${cdId||''}')">Lưu công đoạn</button>`);
+  setTimeout(()=>{const e=el('dm_cd_ten');if(e)e.focus();},60);
+}
+function submitCd(nhomId,cdId){const ten=(el('dm_cd_ten')?el('dm_cd_ten').value:'').trim();if(!ten)return toast('Nhập tên công đoạn.',true);
+  const gia=numVal('dm_cd_gia'),diem=numVal('dm_cd_diem');
+  if(cdId)dmSuaCd(nhomId,cdId,{ten,donGia:gia,diem});else dmThemCd(nhomId,{ten,donGia:gia,diem});
+  modalDanhMuc();toast('Đã lưu công đoạn.');}
+
+/* Bộ chọn công đoạn cho mẫu — thêm từ danh mục, chọn nhiều, xong quay lại form. */
+function modalChonCD(){msSaveFields();const ns=dmList();
+  let h=`<div class="hint" style="margin:-4px 0 12px">Bấm <b>＋ Thêm</b> để đưa công đoạn vào mẫu. Chọn được nhiều. Xong thì bấm nút dưới cùng.</div>`;
+  h+= ns.length? ns.map(n=>{
+    const cds=((n.cd||[]).length?(n.cd||[]).map(c=>`<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--line-2)">
+        <div style="flex:1;min-width:0"><div style="font-weight:650;font-size:13.5px">${escHtml(c.ten)}</div>
+          <div style="font-size:11.5px;color:var(--ink-3);margin-top:1px">${fmt(c.donGia||0)}/cái · ${c.diem||0} điểm</div></div>
+        <button class="btn btn-sage btn-sm" style="white-space:nowrap" onclick="chonCD('${n.id}','${c.id}')">＋ Thêm</button>
+      </div>`).join(''):'<div class="hint" style="margin:6px 0 0">Nhóm này chưa có công đoạn.</div>');
+    return `<div class="card"><div class="card-pad">
+      <div style="font-weight:800;font-size:15px;margin-bottom:2px">${escHtml(n.ten)}</div>${cds}</div></div>`;
+  }).join('') : `<div class="warn-box">Chưa có nhóm máy nào. Mở 📂 Danh mục để tạo trước.</div>`;
+  h+=`<button class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:10px" onclick="modalDanhMuc()">📂 Mở danh mục (thêm/sửa nhóm & công đoạn)</button>`;
+  h+=`<button class="btn btn-primary" onclick="chonCDXong()">Xong — đã chọn ${cdEdit.length} công đoạn</button>`;
+  openSheet('Chọn công đoạn',h);
+}
+function chonCD(nhomId,cdId){const n=dmNhomGet(nhomId),c=dmCdGet(nhomId,cdId);if(!c)return;
+  cdEdit.push({ten:c.ten,donGia:c.donGia||0,diem:c.diem||0,nhom:n?n.ten:null,nhomId:n?n.id:null,canTruoc:[],giaiDoan:null});
+  toast('Đã thêm: '+c.ten);modalChonCD();}
+function chonCDXong(){navBack();}
+let msLive=false;
+function modalKhoMau(){msLive=false;const ks=dsMauSan();
   let h=`<div class="hint" style="margin:-4px 0 12px">Mẫu sẵn = <b>bộ công đoạn + đơn giá</b> dùng chung cho mọi chủ hàng. Vào chủ hàng thêm mẫu thì chọn ở đây, khỏi gõ lại từng công đoạn.</div><div class="card">`;
   h+=ks.length?ks.map(k=>`<div class="slip" onclick="modalSuaMauSan('${k.id}')">
       <div style="min-width:0"><div class="who">${escHtml(k.ten)} ✎</div>
         <div class="meta">cỡ ${(k.sizeList||SIZES).join('/')} · ${k.congDoan.length} công đoạn · giá ${fmt(k.giaGiaCong||0)}/cái${k.soLan?' · đã dùng '+k.soLan+' lần':''}</div></div>
       <div class="slip-right"><span style="color:var(--ink-3)">›</span></div></div>`).join('')
     :`<div class="divider-note" style="padding:14px">Chưa có mẫu sẵn nào.</div>`;
-  h+=`</div><button class="btn btn-primary" onclick="modalThemMauSan()">＋ Thêm mẫu sẵn</button>`;
+  h+=`</div><button class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:10px" onclick="modalDanhMuc()">📂 Danh mục công đoạn theo nhóm máy (${dmList().length} nhóm)</button>`;
+  h+=`<button class="btn btn-primary" onclick="modalThemMauSan()">＋ Thêm mẫu sẵn</button>`;
   openSheet('Kho mẫu sẵn ('+ks.length+')',h);}
-function modalThemMauSan(veChu){cdEdit=[{ten:'',donGia:0,diem:0,canTruoc:[],giaiDoan:null}];msCtx={id:'',sizeList:SIZES.slice(),veChu:veChu||''};drawMauSanForm('','',0,0);}
-function modalSuaMauSan(id){const k=getMauSan(id);if(!k)return;cdEdit=(k.congDoan||[]).map(c=>({...c,canTruoc:migCT(c.canTruoc)}));
-  msCtx={id,sizeList:(k.sizeList&&k.sizeList.length)?k.sizeList.slice():SIZES.slice()};
-  drawMauSanForm(id,k.ten,k.gioDinhMuc||0,k.giaGiaCong||0);}
+function modalThemMauSan(veChu){if(!(msLive&&msCtx&&msCtx.__new)){cdEdit=[];msCtx={id:'',sizeList:SIZES.slice(),veChu:veChu||'',__new:true,ten:'',gio:0,gia:0};msLive=true;}drawMauSanForm(msCtx.id||'',msCtx.ten||'',msCtx.gio||0,msCtx.gia||0);}
+function modalSuaMauSan(id){const k=getMauSan(id);if(!k)return;
+  if(!(msLive&&msCtx&&msCtx.id===id&&!msCtx.__new)){
+    cdEdit=(k.congDoan||[]).map(c=>({...c,canTruoc:migCT(c.canTruoc)}));
+    msCtx={id,sizeList:(k.sizeList&&k.sizeList.length)?k.sizeList.slice():SIZES.slice(),ten:k.ten||'',gio:k.gioDinhMuc||0,gia:k.giaGiaCong||0};
+    msLive=true;
+  }
+  drawMauSanForm(id,(msCtx.ten!=null?msCtx.ten:(k.ten||'')),msCtx.gio||0,msCtx.gia||0);}
 function msTabBar(active){
   const kd=cdEdit.filter(c=>normCT(c.canTruoc).length).length;
   const gd=cdEdit.filter(c=>c.giaiDoan!=null&&c.giaiDoan!=='').length;
@@ -6175,13 +6274,13 @@ function msTabBar(active){
 function msTab(v){const cur=(msCtx&&msCtx.view)||'form';if(v===cur)return;if(v==='dk')modalDKMauSan();else if(v==='neo')modalNeoMauSan();else dkXong();}
 function drawMauSanForm(id,ten,gio,gia){
   msCtx.ten=ten||'';msCtx.view='form';
-  const cdHead=`<div class="sizegrid" style="grid-template-columns:1.5fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:10.5px;color:var(--ink-3);font-weight:700;letter-spacing:.02em">
-    <div>Công đoạn</div><div style="text-align:right">Đơn giá</div><div style="text-align:right">Điểm</div><div style="min-width:26px"></div></div>`;
-  const rows=cdHead+cdEdit.map((c,i)=>`<div class="sizegrid" style="grid-template-columns:1.5fr 1fr 1fr auto;gap:6px;margin-bottom:6px">
-    <input placeholder="Tên công đoạn ${i+1}" value="${escHtml(c.ten)}" oninput="cdEdit[${i}].ten=this.value" style="padding:10px 8px;border:1.5px solid var(--line);border-radius:10px;font-weight:600">
-    <input type="text" inputmode="numeric" class="sep" placeholder="Đơn giá" value="${sepStr(c.donGia)}" oninput="cdEdit[${i}].donGia=numOf(this)" style="padding:10px 8px;border:1.5px solid var(--line);border-radius:10px;font-weight:600;text-align:right">
-    <input type="text" inputmode="numeric" class="sep" placeholder="Điểm" value="${c.diem?sepStr(c.diem):''}" oninput="cdEdit[${i}].diem=numOf(this)" style="padding:10px 8px;border:1.5px solid var(--line);border-radius:10px;font-weight:600;text-align:right">
-    <button class="mini-btn" style="align-self:center" onclick="cdEdit.splice(${i},1);redrawMauSan()">✕</button></div>`).join('');
+  const rows=cdEdit.length?cdEdit.map((c,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border:1.5px solid var(--line);border-radius:11px;margin-bottom:6px;background:var(--card)">
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;font-size:13.5px">${i+1}. ${escHtml(c.ten||'(chưa đặt tên)')}</div>
+      <div style="font-size:11.5px;color:var(--ink-3);margin-top:2px">${c.nhom?`<b style="color:var(--sage)">${escHtml(c.nhom)}</b> · `:'<span style="color:var(--thread)">chưa phân nhóm</span> · '}${fmt(c.donGia||0)}/cái · ${c.diem||0} điểm</div>
+    </div>
+    <button class="mini-btn" style="align-self:center" onclick="cdEdit.splice(${i},1);redrawMauSan()">✕</button></div>`).join('')
+    :`<div class="hint" style="margin:0 0 8px">Chưa có công đoạn — bấm nút dưới để chọn từ danh mục nhóm máy.</div>`;
   openSheet(ten?escHtml(ten):(id?'Sửa mẫu sẵn':'Thêm mẫu sẵn'),`
     ${msTabBar('form')}
     <div class="hint" style="margin:-4px 0 12px">Mẫu sẵn không kèm ảnh — ảnh chụp riêng cho từng chủ hàng lúc thêm mẫu.</div>
@@ -6190,8 +6289,9 @@ function drawMauSanForm(id,ten,gio,gia){
       <input id="ms_sizes" value="${(msCtx.sizeList||[]).join(', ')}" placeholder="VD: S, M, L, XL hoặc Freesize" oninput="msCtx.sizeList=this.value.split(',').map(x=>x.trim()).filter(Boolean)"></div>
     <div class="field"><label>Giá gia công gợi ý / 1 cái</label><input type="text" inputmode="numeric" class="sep" id="ms_gia" value="${sepStr(gia)}">
       <div class="hint">Chỉ là số gợi ý — mỗi chủ hàng trả khác nhau thì sửa lại lúc thêm mẫu.</div></div>
-    <div class="field"><label>Công đoạn & đơn giá công/cái</label>${rows}
-      <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:4px" onclick="cdEdit.push({ten:'',donGia:0,diem:0,canTruoc:[],giaiDoan:null});redrawMauSan()">＋ Thêm công đoạn</button></div>
+    <div class="field"><label>Công đoạn (chọn từ danh mục nhóm máy)</label>${rows}
+      <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:4px" onclick="modalChonCD()">＋ Chọn công đoạn từ danh mục</button>
+      <div class="hint" style="margin-top:6px">Tên · đơn giá · điểm lấy nguyên từ danh mục, không sửa tại đây. Sửa thông số thì vào 📂 Danh mục công đoạn.</div></div>
     <div class="field"><label>Giờ định mức / 100 cái (nếu có khâu tính giờ)</label><input type="number" id="ms_gio" value="${gio||0}" step="0.1"></div>
     ${id?`<div class="hint" style="margin-bottom:10px">Sửa ở đây <b>không</b> đổi mẫu đã tạo cho chủ hàng — mẫu bên đó là bản riêng, đơn đang chạy vẫn giữ giá cũ.</div>
       <button class="btn btn-danger" style="margin-bottom:10px" onclick="doXoaMauSan('${id}')">Xóa mẫu sẵn này</button>`:''}
@@ -6274,7 +6374,7 @@ function submitMauSan(id){const ten=((el('ms_ten')?el('ms_ten').value:(msCtx.ten
   const keep=cdEdit.map((c,i)=>({c,i})).filter(o=>o.c.ten.trim()&&o.c.donGia>0);
   if(!keep.length)return toast('Thêm ít nhất một công đoạn có giá.',true);
   const o2n={};keep.forEach((o,ni)=>{o2n[o.i]=ni;});
-  const cd=keep.map(o=>({ten:o.c.ten.trim(),donGia:o.c.donGia,diem:o.c.diem||0,giaiDoan:normGD(o.c.giaiDoan),
+  const cd=keep.map(o=>({ten:o.c.ten.trim(),donGia:o.c.donGia,diem:o.c.diem||0,nhom:o.c.nhom||null,nhomId:o.c.nhomId||null,giaiDoan:normGD(o.c.giaiDoan),
     canTruoc:normCT(o.c.canTruoc).map(g=>g.map(x=>o2n[x]).filter(x=>x!==undefined&&x!==o2n[o.i])).filter(g=>g.length)}));
   const gio=el('ms_gio')?(+el('ms_gio').value||0):(msCtx.gio||0),gia=el('ms_gia')?numVal('ms_gia'):(msCtx.gia||0);
   const sizeList=(msCtx.sizeList&&msCtx.sizeList.length)?msCtx.sizeList:SIZES.slice();
@@ -6356,7 +6456,7 @@ function navBack(){
 }
 function navCloseAll(){_nav=[];_hardClose();}   /* đóng hết sheet, về màn nền (dùng sau khi ghi xong) */
 function _hardClose(){el('scrim').classList.remove('on');_nvBackTo=null;_sheetClose=null;}
-const _NAV_FRAMES=['modalDon','modalTaoDon','modalGiaoViec','modalNhanVe','modalChamGio','modalChiPhiDon','modalGiaoXe','modalTienDen','modalXinCham','modalChamVe','modalThao','modalGiaoTP','modalChuHang','modalThuChuHang','modalThuTien','modalSuaKhoan','modalNoXau','modalChiPhi','modalRutVon','modalBoVon','modalGhiBoSung','modalGhiTien','modalSoCong','modalChotLuong','modalSoCongTho','modalChotSo','modalThoChiTiet','modalThoThuong','modalNangSuatXep','modalNSChiTiet','modalThietLapThuong','modalThuongCT','modalKhoThuong','modalThemMauThuong','modalSuaMauThuong','modalThietLapMucTieu','modalMucTieuCT','modalTraThuongKy','modalLoTrinhThuong','modalTraLuong','modalUng','modalPhatSinhTho','modalSuaPhatSinh','modalSuaDonLS','modalSuaDon','modalOp','modalChonChuThu','modalCaiDat','modalPhucHoi','modalThemChu','modalSuaChu','modalThemTho','modalSuaTho','modalThemMau','modalSuaMau','modalKhoMau','modalThemMauSan','modalSuaMauSan','modalDKMauSan','modalNeoMauSan','modalDauKy','moNhanNhanh','doDongDon','confirmDongDon','confirmHuyDon','confirmTraLai','confirmTraHet','confirmXoaDon','confirmXoaHanDon','kmChot','mcOpen','exportModal','hoiLanTruyen','moKetNoiDamMay','openSoKeToan','askDao','ltDetail','modalSoRieng','modalLaiDon','modalLaiLichSu','modalChiPhiXong','modalThemMucCoDinh','modalLo','modalLaiLo','modalChiPhiLo','modalNgayNghiBao','modalDoiMocBao','modalKet','modalNapQuyChi','modalTraQuyChi','modalQuyChiTiet','modalDieuChinhQuy','modalKhoanReadOnly','modalSrCat','nvXong','modalTaoNguoc','modalNhapNguoc'];
+const _NAV_FRAMES=['modalDon','modalTaoDon','modalGiaoViec','modalNhanVe','modalChamGio','modalChiPhiDon','modalGiaoXe','modalTienDen','modalXinCham','modalChamVe','modalThao','modalGiaoTP','modalChuHang','modalThuChuHang','modalThuTien','modalSuaKhoan','modalNoXau','modalChiPhi','modalRutVon','modalBoVon','modalGhiBoSung','modalGhiTien','modalSoCong','modalChotLuong','modalSoCongTho','modalChotSo','modalThoChiTiet','modalThoThuong','modalNangSuatXep','modalNSChiTiet','modalThietLapThuong','modalThuongCT','modalKhoThuong','modalThemMauThuong','modalSuaMauThuong','modalThietLapMucTieu','modalMucTieuCT','modalTraThuongKy','modalLoTrinhThuong','modalTraLuong','modalUng','modalPhatSinhTho','modalSuaPhatSinh','modalSuaDonLS','modalSuaDon','modalOp','modalChonChuThu','modalCaiDat','modalPhucHoi','modalThemChu','modalSuaChu','modalThemTho','modalSuaTho','modalThemMau','modalSuaMau','modalKhoMau','modalThemMauSan','modalSuaMauSan','modalDKMauSan','modalNeoMauSan','modalDauKy','moNhanNhanh','doDongDon','confirmDongDon','confirmHuyDon','confirmTraLai','confirmTraHet','confirmXoaDon','confirmXoaHanDon','kmChot','mcOpen','exportModal','hoiLanTruyen','moKetNoiDamMay','openSoKeToan','askDao','ltDetail','modalSoRieng','modalLaiDon','modalLaiLichSu','modalChiPhiXong','modalThemMucCoDinh','modalLo','modalLaiLo','modalChiPhiLo','modalNgayNghiBao','modalDoiMocBao','modalKet','modalNapQuyChi','modalTraQuyChi','modalQuyChiTiet','modalDieuChinhQuy','modalKhoanReadOnly','modalSrCat','nvXong','modalTaoNguoc','modalNhapNguoc','modalDanhMuc','modalChonCD','modalNhomForm','modalCdForm'];
 function _installNavFrames(){_NAV_FRAMES.forEach(name=>{const orig=window[name];
   if(typeof orig!=='function'||orig._wrapped)return;
   const w=function(){const a=Array.prototype.slice.call(arguments);_frame(name,a);return orig.apply(this,a);};
