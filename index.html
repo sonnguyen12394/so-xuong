@@ -574,6 +574,76 @@ function moKiemTraSo(){
   openSheet('Kiểm tra sổ', body);
 }
 
+/* ===== DỌN SỔ — tự dò & sửa bút toán ĐẢO MỒ CÔI + CHỐT‑MA (giữ Nợ=Có, hoàn tác được) =====
+   • Đảo mồ côi: bút toán "Sửa/đảo" có dao_cua trỏ tới id KHÔNG còn trong sổ → ghi khống.
+   • Chốt‑ma:   chốt bao ngày mà phần ghi nợ tương ứng đã mất (net tích luỹ chốt ≤ 0).
+   Cả hai đều là hệ quả của đồng bộ/sửa làm rơi bút toán gốc. Chỉ GỠ những mục này;
+   mỗi mục gỡ đi vốn đã tự cân Nợ=Có nên Σ toàn sổ không đổi. */
+function donSoSigmaOk(){let n=0,c=0;(DB.butToan||[]).forEach(b=>(b.dong||[]).forEach(d=>{if(d.chieu==='NO')n+=d.soTien;else c+=d.soTien;}));return Math.abs(n-c)<1;}
+function donSoQuet(){
+  const bt=DB.butToan||[]; const ids=new Set(bt.map(b=>b.id));
+  const orphans=bt.filter(b=>b.dao_cua&&!ids.has(b.dao_cua));
+  const orphSet=new Set(orphans.map(b=>b.id));
+  const accrual={};
+  bt.forEach(b=>{ if(orphSet.has(b.id))return;
+    if(/Chốt lương bao ngày/.test(b.suKien||''))(b.dong||[]).forEach(d=>{
+      if(d.tk===TK.PHAI_TRA_THO&&d.thoId)accrual[d.thoId]=(accrual[d.thoId]||0)+(d.chieu==='CO'?d.soTien:-d.soTien);});});
+  const ghost=(DB.chotBao||[]).filter(c=>(c.kieu==='bao'||!c.kieu)&&(accrual[c.thoId]||0)<=0);
+  return {orphans,ghost};
+}
+function _thoBao(){return (DB.tho||[]).filter(t=>t.loai==='bao'&&(t.donGiaNgay||0)>0);}
+function _daTraNet(id){return Math.max(0,bal(TK.PHAI_TRA_THO,d=>d.thoId===id).net);}
+function moDonSo(){
+  const {orphans,ghost}=donSoQuet();
+  let h=`<div class="hint" style="margin:-4px 0 12px">Tự dò sổ đang chạy, gỡ <b>bút toán đảo mồ côi</b> (đảo mà mất bản gốc) và <b>chốt‑ma</b> (chốt bao mất ghi nợ) — thường do đồng bộ/sửa làm rơi dòng. Không đụng dòng đúng, luôn giữ <b>Nợ = Có</b>, và <b>hoàn tác được</b>.</div>`;
+  h+=`<div class="card"><div class="card-pad">
+    <div class="kv"><div class="k">Bút toán đảo mồ côi</div><div class="v ${orphans.length?'money-neg':''}">${orphans.length}</div></div>
+    <div class="kv"><div class="k">Chốt‑ma (chốt bao mất ghi nợ)</div><div class="v ${ghost.length?'money-neg':''}">${ghost.length}</div></div>
+    <div class="kv"><div class="k">Nợ = Có hiện tại</div><div class="v">${donSoSigmaOk()?'<b style="color:var(--sage)">Cân</b>':'<b style="color:var(--thread)">LỆCH</b>'}</div></div>
+  </div></div>`;
+  const bao=_thoBao();
+  if(bao.length){
+    h+=`<div class="section-h">Thợ bao — hiện trạng</div><div class="card"><div class="card-pad">`;
+    bao.forEach(t=>{h+=`<div class="kv"><div class="k">${escHtml(t.ten)}</div><div class="v" style="font-weight:600">${fmt(_daTraNet(t.id))} đã trả · <span style="color:var(--ink-2)">${soNgayBao(t.id)} ngày chưa trả</span></div></div>`;});
+    h+=`</div></div>`;
+  }
+  if(!orphans.length&&!ghost.length){
+    h+=`<div class="alert-strip as-green" style="border-radius:12px"><b>✓ Sổ sạch — không có bút toán mồ côi hay chốt‑ma.</b></div>`;
+  }else{
+    h+=`<button class="btn btn-tape" style="width:100%" onclick="chayDonSo()">🩹 Dọn ngay — gỡ ${orphans.length+ghost.length} mục</button>
+      <div class="hint" style="margin-top:8px">Nên <b>Sao lưu (JSON)</b> trước cho chắc. Sau khi dọn có nút Hoàn tác ngay bên dưới.</div>`;
+  }
+  openSheet('Dọn sổ',h);
+}
+let _donSoBackup=null;
+function chayDonSo(){
+  const {orphans,ghost}=donSoQuet();
+  if(!orphans.length&&!ghost.length){toast('Sổ đã sạch.');return;}
+  _donSoBackup=JSON.stringify(DB);                    // ảnh chụp để hoàn tác
+  const bao=_thoBao(); const truoc={};
+  bao.forEach(t=>truoc[t.id]={net:_daTraNet(t.id),ng:soNgayBao(t.id)});
+  const orphSet=new Set(orphans.map(b=>b.id)), ghostSet=new Set(ghost.map(c=>c.id));
+  DB.butToan=DB.butToan.filter(b=>!orphSet.has(b.id));
+  DB.chotBao=(DB.chotBao||[]).filter(c=>!ghostSet.has(c.id));
+  Store.save();
+  const ok=donSoSigmaOk();
+  let h=`<div class="alert-strip as-green" style="border-radius:12px;margin-bottom:12px"><b>✓ Đã dọn: gỡ ${orphans.length} bút toán mồ côi, ${ghost.length} chốt‑ma.</b></div>`;
+  h+=`<div class="card"><div class="card-pad"><div class="kv"><div class="k">Nợ = Có sau khi dọn</div><div class="v">${ok?'<b style="color:var(--sage)">Cân ✓</b>':'<b style="color:var(--thread)">LỆCH — hãy Hoàn tác</b>'}</div></div></div></div>`;
+  if(bao.length){
+    h+=`<div class="section-h">Thợ bao — trước → sau</div><div class="card"><div class="card-pad">`;
+    bao.forEach(t=>{const a=truoc[t.id],netS=_daTraNet(t.id),ngS=soNgayBao(t.id),doi=a.net!==netS||a.ng!==ngS;
+      h+=`<div class="kv"><div class="k">${escHtml(t.ten)}${doi?' <span class="badge b-run" style="font-size:9px;padding:2px 7px">đổi</span>':''}</div><div class="v" style="font-size:12.5px;font-weight:600">${fmt(a.net)} → <b>${fmt(netS)}</b><br><span style="color:var(--ink-2)">${a.ng} → ${ngS} ngày chưa trả</span></div></div>`;});
+    h+=`</div></div>`;
+  }
+  h+=`<button class="btn btn-ghost" style="width:100%" onclick="hoanTacDonSo()">↶ Hoàn tác dọn sổ</button>`;
+  render();
+  openSheet('Đã dọn sổ',h);
+}
+function hoanTacDonSo(){
+  if(!_donSoBackup){toast('Không còn bản trước để hoàn tác.',true);return;}
+  DB=JSON.parse(_donSoBackup); _donSoBackup=null; Store.save(); render(); closeSheet(); toast('Đã hoàn tác dọn sổ.');
+}
+
 
 /* ---------- tiện ích ---------- */
 function uid(){return Math.random().toString(36).slice(2,10)}
@@ -5982,7 +6052,7 @@ function modalCaiDat(){
     <div class="kv"><div class="k">Tỷ lệ chi phí chung (ước)</div><div class="v">${Math.round(DB.settings.tyLeChung*100)}%</div></div>
     <div class="kv"><div class="k">Khóa kỳ gần nhất</div><div class="v">${DB.settings.kyKhoaTime?new Date(DB.settings.kyKhoaTime).toLocaleDateString('vi-VN'):'chưa lần nào'}</div></div>
     <div style="height:10px"></div>
-    <button class="btn btn-ghost" onclick="openSoKeToan()">⚙️ Sổ kế toán (kỹ thuật)</button><div style="height:8px"></div><button class="btn btn-ghost" onclick="moKiemTraSo()">🔍 Kiểm tra sổ (đối chiếu cân đối)</button></div></div>`;
+    <button class="btn btn-ghost" onclick="openSoKeToan()">⚙️ Sổ kế toán (kỹ thuật)</button><div style="height:8px"></div><button class="btn btn-ghost" onclick="moKiemTraSo()">🔍 Kiểm tra sổ (đối chiếu cân đối)</button><div style="height:8px"></div><button class="btn btn-ghost" onclick="moDonSo()">🩹 Dọn sổ (sửa bút toán lệch)</button></div></div>`;
   h+=`<div class="section-h">Bắt đầu lại</div><div class="card"><div class="card-pad">
     <div class="act-grid">
       <button class="btn btn-ghost" onclick="resetData()">↺ Nạp dữ liệu mẫu</button>
