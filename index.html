@@ -4426,16 +4426,34 @@ function csCalc(){const dg=numVal('cs_dg');const dvE=el('cs_dv');const dv=dvE?(+
 function csSetDanTrai(v){DB.settings=DB.settings||{};DB.settings.danTraiBao=!!v;Store.save();}
 function submitChotSoSP(thoId){try{const val=numVal('cs_tra');if(val<=0)return toast('Nhập số tiền.',true);
   traLuong({thoId,soTien:val});closeSheet();render();toast('Đã chốt & ghi trả lương.');}catch(e){toast(e.message,true)}}
+let _chotPending=null;
 function submitChotSoBao(thoId,kieu){try{
   const dg=numVal('cs_dg');const dvE=el('cs_dv');const dv=dvE?(+((''+dvE.value).replace(/[^\d]/g,''))||0):0;
-  const pay=Math.round(dg*dv);const tra=numVal('cs_tra');
-  if(pay<=0)return toast('Nhập đơn giá và số '+(kieu==='bao'?'ngày':'giờ')+'.',true);
+  const tra=numVal('cs_tra');
+  const danTrai=kieu==='bao'&&!!(el('cs_dantrai')&&el('cs_dantrai').checked);
+  _chotPending={thoId,kieu,dg,dv,tra,danTrai,giaTri:_csGiaTri};
+  /* Tự dò lệch: có tiền đã trả qua "Trả lương" mà chưa vào vốn → hỏi ghi bù trước khi chốt */
+  if(kieu==='bao'){const b=bal(TK.PHAI_TRA_THO,x=>x.thoId===thoId);const traDu=Math.max(0,b.no-b.co);
+    if(traDu>0){_chotBaoHoiLech(thoId,traDu);return;}}
+  _chotBaoThuc();
+}catch(e){toast(e.message,true)}}
+function _chotBaoHoiLech(thoId,traDu){const ten=getTho(thoId).ten;
+  el('confirmbox').innerHTML=`<div class="sheet-h"><b>Phát hiện lệch</b><button class="sheet-x" onclick="closeConfirm()">✕</button></div>
+    <div class="sheet-body">
+    <div class="hint" style="margin-top:0;font-size:14px;color:var(--ink)">Có <b>${fmt(traDu)}</b> đã trả trước cho <b>${escHtml(ten)}</b> qua “Trả lương” nhưng <b>chưa tính vào vốn</b> → lãi đang cao hơn thực.<br><br>Ghi bù cho đúng rồi chốt? <span style="color:var(--ink-3)">(Không trừ tiền lần nữa.)</span></div>
+    <div style="height:14px"></div>
+    <button class="btn btn-sage" style="width:100%;margin-bottom:8px" onclick="closeConfirm();dongBoChiPhiBao(_chotPending&&_chotPending.thoId,true);_chotBaoThuc();">Ghi bù cho đúng rồi chốt</button>
+    <button class="btn btn-ghost" style="width:100%" onclick="closeConfirm();_chotBaoThuc();">Chốt luôn, không bù</button>
+    </div>`;
+  el('scrim2').classList.add('on');}
+function _chotBaoThuc(){try{const p=_chotPending;if(!p)return;const thoId=p.thoId,kieu=p.kieu,dg=p.dg,dv=p.dv,tra=p.tra,danTrai=p.danTrai;
+  const pay=Math.round(dg*dv);
+  if(pay<=0){if(tra<=0){_chotPending=null;closeSheet();render();return;}return toast('Nhập đơn giá và số '+(kieu==='bao'?'ngày':'giờ')+'.',true);}
   if(tra>pay+Math.max(0,luongNoTho(thoId)))return toast('Tiền trả nhiều hơn mức phải trả.',true);
   let ngayCong=null,ngayObjs=null;
   if(kieu==='bao'){const chua=baoNgayCong(thoId).list;/* mới->cũ */const pick=dv>0?chua.slice(-dv):[];ngayCong=pick.map(d=>d.key);ngayObjs=pick.map(d=>({key:d.key,ngay:d.ngay}));}
-  const danTrai=kieu==='bao'&&!!(el('cs_dantrai')&&el('cs_dantrai').checked);
-  chotSoBao({thoId,kieu,donGia:dg,soDVi:dv,payable:pay,giaTriCD:_csGiaTri,tienTra:tra,ngayCong,ngayObjs,danTrai});
-  closeSheet();render();toast('Đã chốt sổ & ghi lương bao.');}catch(e){toast(e.message,true)}}
+  chotSoBao({thoId,kieu,donGia:dg,soDVi:dv,payable:pay,giaTriCD:p.giaTri,tienTra:tra,ngayCong,ngayObjs,danTrai});
+  _chotPending=null;closeSheet();render();toast('Đã chốt sổ & ghi lương bao.');}catch(e){toast(e.message,true)}}
 function chotSoBao({thoId,kieu,donGia,soDVi,payable,giaTriCD,tienTra,ngayCong,ngayObjs,danTrai}){DB.chotBao=DB.chotBao||[];beginOp();
   const ten=getTho(thoId).ten;
   if(payable>0){
@@ -4456,6 +4474,31 @@ function chotSoBao({thoId,kieu,donGia,soDVi,payable,giaTriCD,tienTra,ngayCong,ng
     {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien:tienTra,thoId},{tk:TK.QUY,chieu:'CO',soTien:tienTra}]);
   DB.chotBao.push({id:uid(),thoId,kieu,ngay:now(),denNgay:now(),donGia,soDVi,payable,giaTriCD,tienTra,ngayCong:ngayCong||null,danTrai:!!danTrai});
   Store.save();}
+/* ĐỒNG BỘ LẠI (thợ bao ngày): phần đã trả bằng "Trả lương" chỉ ra tiền, CHƯA ghi vốn →
+   ghi bù chi phí (Nợ Rổ chung / Có Nợ lương thợ) dàn ĐÚNG từng ngày cũ nhất, đánh dấu
+   những ngày đó ĐÃ CHỐT để không trả trùng. KHÔNG rút tiền lần nữa. Là 1 thao tác — hoàn tác được. */
+function dongBoChiPhiBao(thoId,quiet){try{
+  const t=getTho(thoId);if(!t)return;
+  const b=bal(TK.PHAI_TRA_THO,x=>x.thoId===thoId);const traDu=Math.max(0,b.no-b.co);
+  if(traDu<=0)return toast('Không có khoản nào cần đồng bộ.');
+  const dg=t.donGiaNgay||0;
+  if(dg<=0)return toast('Chưa có đơn giá/ngày cho thợ này — đặt đơn giá trước.',true);
+  const start=baoStartTs(thoId),upper=baoUpperTs(thoId);
+  const off=baoNghiSet(thoId),act=baoActSet(thoId),done=baoDaChotSet(thoId);
+  const chua=[];let g=0;
+  for(let d=upper;d>=start&&g<800;d-=86400000,g++){const k=new Date(d).toLocaleDateString('vi-VN');
+    if(off.has(k)&&!act.has(k))continue;if(done.has(k))continue;chua.push({key:k,ngay:d});}
+  const nDu=Math.min(chua.length,Math.floor(traDu/dg));
+  if(nDu>=1){const days=chua.slice(chua.length-nDu);
+    chotSoBao({thoId,kieu:'bao',donGia:dg,soDVi:nDu,payable:traDu,
+      giaTriCD:soCongTong(thoId,baoWatermark(thoId)),tienTra:0,
+      ngayCong:days.map(d=>d.key),ngayObjs:days.map(d=>({key:d.key,ngay:d.ngay})),danTrai:true});
+  } else { beginOp();
+    ghi('Đồng bộ chi phí lương ('+t.ten+')',[
+      {tk:TK.RO_CHUNG,chieu:'NO',soTien:traDu},
+      {tk:TK.PHAI_TRA_THO,chieu:'CO',soTien:traDu,thoId}]);Store.save(); }
+  if(!quiet){drawChotSo();render();toastUndo('Đã đồng bộ — ghi bù chi phí, không trừ tiền lần nữa.');}
+}catch(e){toast(e.message,true)}}
 /* ---- Bảng xếp hạng NĂNG SUẤT: điểm của từng thợ, cao → thấp ---- */
 /* ========== NĂNG SUẤT — 3 tab: Năng suất · Thưởng · Mục tiêu ==========
    Kiến trúc dữ liệu-hoá: chương trình thưởng (DB.settings.thuongCT) và
@@ -5030,6 +5073,8 @@ function modalNSChiTiet(thoId,kind){const t=getTho(thoId);const ns=nangSuat(thoI
       <b style="white-space:nowrap;text-align:right">${K.fv(r)}</b></div>`;});
     h+=`</div></div>`;});
   openSheet(K.t+' · '+t.ten,h);}
+let _thoTab='may';
+function thoTab(tab,id){_thoTab=tab;modalThoChiTiet(id);}
 function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
   if(t.isOwner){openSheet(t.ten,`
     <div class="card"><div class="card-pad">
@@ -5038,7 +5083,10 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
     <div class="hint" style="text-align:center">Công của bạn được tính vào giá vốn nên lãi là lãi thật. Không phải trả tiền ra.</div>`
     +srSectionHtml(id));return;}
   const no=luongNoTho(id);const daTra=sum(traUngList(id).map(x=>x.tien));
-  let h=`<div class="card"><div class="card-pad">
+  const _tab=_thoTab;
+  let h=`<div class="chipset" style="margin-bottom:12px"><div class="chip ${_tab==='may'?'sel':''}" onclick="thoTab('may','${id}')">Thông tin may</div><div class="chip ${_tab==='ns'?'sel':''}" onclick="thoTab('ns','${id}')">Năng suất</div><div class="chip ${_tab==='thu'?'sel':''}" onclick="thoTab('thu','${id}')">Sổ thu chi</div></div>`;
+  if(_tab==='may'){
+  h+=`<div class="card"><div class="card-pad">
     <div class="kv"><div class="k">Xưởng còn nợ lương</div><div class="v big-num ${no>0?'money-neg':no<0?'money-pos':''}">${fmt(no)}</div></div>
     <div class="kv"><div class="k">Đã trả / ứng</div><div class="v">${fmt(daTra)}</div></div></div></div>`;
   h+=`<div class="act-grid">
@@ -5062,7 +5110,11 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
       <div class="kv"><div class="k">Công đã tính sổ</div><div class="v">${roi.length} mục</div></div></div></div>`;}
   h+=`<div class="act-grid"><button class="btn btn-ghost" onclick="modalSoCongTho('${id}')">📋 Sổ công của thợ</button>
     <button class="btn btn-tape" onclick="modalChotSo('${id}')">🧾 Chốt sổ</button></div>`;
+  h+=`<div style="height:6px"></div><button class="btn btn-ghost" onclick="modalSuaTho('${id}')">✎ Sửa thông tin thợ</button>`;
+  h+=`<div style="height:8px"></div><button class="btn btn-danger btn-sm" style="width:100%" onclick="confirmXoaTho('${id}')">🗑 Xóa thợ này</button>`;
+  }
   const chev='<span style="color:var(--ink-3);margin-left:4px">›</span>';
+  if(_tab==='ns'){
   h+=`<div class="section-h">Năng suất</div><div class="card"><div class="card-pad">
     <div class="kv" style="cursor:pointer" onclick="modalNSChiTiet('${id}','cai')"><div class="k">Tổng số cái đã làm</div><div class="v">${sepStr(ns.tongCai)} cái${chev}</div></div>
     ${ns.tongGio?`<div class="kv" style="cursor:pointer" onclick="modalNSChiTiet('${id}','gio')"><div class="k">Tổng giờ</div><div class="v">${ns.tongGio} giờ${chev}</div></div>`:''}
@@ -5071,9 +5123,8 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
     <div class="kv" style="cursor:pointer" onclick="modalNSChiTiet('${id}','phe')"><div class="k">Hàng phế</div><div class="v ${ns.tongPhe>0?'money-neg':''}">${ns.tongPhe} cái${chev}</div></div>
     ${ctList().filter(p=>p.on).length?`<div class="kv" style="cursor:pointer" onclick="modalThoThuong('${id}')"><div class="k">Thưởng tháng này</div><div class="v" style="color:var(--brand)">${(function(){const w=nsWin();const r=thuongThoTong(id,w.from,w.to);return r.tong>0?'+'+fmt(r.tong):'xem';})()}${chev}</div></div>`:''}</div></div>`;
   h+=`<div class="hint" style="text-align:center;margin:4px 0 12px">Lương tự cộng từ số hàng thợ trả về — không cộng tay.</div>`;
-  h+=srSectionHtml(id);
-  h+=`<button class="btn btn-ghost" onclick="modalSuaTho('${id}')">✎ Sửa thông tin thợ</button>`;
-  h+=`<div style="height:8px"></div><button class="btn btn-danger btn-sm" style="width:100%" onclick="confirmXoaTho('${id}')">🗑 Xóa thợ này</button>`;
+  }
+  if(_tab==='thu'){ h+=srSectionHtml(id); }
   openSheet(t.ten,h);
 }
 let _psKind='com';
