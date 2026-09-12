@@ -4432,20 +4432,8 @@ function submitChotSoBao(thoId,kieu){try{
   const tra=numVal('cs_tra');
   const danTrai=kieu==='bao'&&!!(el('cs_dantrai')&&el('cs_dantrai').checked);
   _chotPending={thoId,kieu,dg,dv,tra,danTrai,giaTri:_csGiaTri};
-  /* Tự dò lệch: có tiền đã trả qua "Trả lương" mà chưa vào vốn → hỏi ghi bù trước khi chốt */
-  if(kieu==='bao'){const b=bal(TK.PHAI_TRA_THO,x=>x.thoId===thoId);const traDu=Math.max(0,b.no-b.co);
-    if(traDu>0){_chotBaoHoiLech(thoId,traDu);return;}}
   _chotBaoThuc();
 }catch(e){toast(e.message,true)}}
-function _chotBaoHoiLech(thoId,traDu){const ten=getTho(thoId).ten;
-  el('confirmbox').innerHTML=`<div class="sheet-h"><b>Phát hiện lệch</b><button class="sheet-x" onclick="closeConfirm()">✕</button></div>
-    <div class="sheet-body">
-    <div class="hint" style="margin-top:0;font-size:14px;color:var(--ink)">Có <b>${fmt(traDu)}</b> đã trả trước cho <b>${escHtml(ten)}</b> qua “Trả lương” nhưng <b>chưa tính vào vốn</b> → lãi đang cao hơn thực.<br><br>Ghi bù cho đúng rồi chốt? <span style="color:var(--ink-3)">(Không trừ tiền lần nữa.)</span></div>
-    <div style="height:14px"></div>
-    <button class="btn btn-sage" style="width:100%;margin-bottom:8px" onclick="closeConfirm();dongBoChiPhiBao(_chotPending&&_chotPending.thoId,true);_chotBaoThuc();">Ghi bù cho đúng rồi chốt</button>
-    <button class="btn btn-ghost" style="width:100%" onclick="closeConfirm();_chotBaoThuc();">Chốt luôn, không bù</button>
-    </div>`;
-  el('scrim2').classList.add('on');}
 function _chotBaoThuc(){try{const p=_chotPending;if(!p)return;const thoId=p.thoId,kieu=p.kieu,dg=p.dg,dv=p.dv,tra=p.tra,danTrai=p.danTrai;
   const pay=Math.round(dg*dv);
   if(pay<=0){if(tra<=0){_chotPending=null;closeSheet();render();return;}return toast('Nhập đơn giá và số '+(kieu==='bao'?'ngày':'giờ')+'.',true);}
@@ -4455,22 +4443,27 @@ function _chotBaoThuc(){try{const p=_chotPending;if(!p)return;const thoId=p.thoI
   chotSoBao({thoId,kieu,donGia:dg,soDVi:dv,payable:pay,giaTriCD:p.giaTri,tienTra:tra,ngayCong,ngayObjs,danTrai});
   _chotPending=null;closeSheet();render();toast('Đã chốt sổ & ghi lương bao.');}catch(e){toast(e.message,true)}}
 function chotSoBao({thoId,kieu,donGia,soDVi,payable,giaTriCD,tienTra,ngayCong,ngayObjs,danTrai}){DB.chotBao=DB.chotBao||[];beginOp();
-  const ten=getTho(thoId).ten;
+  const ten=getTho(thoId).ten;let _traDan=false;
   if(payable>0){
     if(danTrai&&kieu==='bao'&&ngayObjs&&ngayObjs.length){
-      /* Dàn trải: mỗi ngày công 1 bút toán, ghi ĐÚNG ngày làm; đơn giá/ngày, ngày cuối gánh phần lẻ để khớp tổng */
-      const n=ngayObjs.length;let conLai=payable;
-      ngayObjs.forEach((o,i)=>{const m=(i===n-1)?conLai:Math.round(donGia);conLai-=m;if(m<=0)return;
-        ghi('Chốt lương bao ngày ('+ten+')',[
+      /* Dàn trải: mỗi ngày công ghi ĐÚNG ngày làm — cả CHI PHÍ lẫn TRẢ TIỀN, không dồn cục hôm chốt */
+      const n=ngayObjs.length;let conLai=payable;let conLaiTra=Math.max(0,tienTra);
+      ngayObjs.forEach((o,i)=>{const td={thoiDiem:(o.ngay||now())};
+        const m=(i===n-1)?conLai:Math.round(donGia);conLai-=m;
+        if(m>0)ghi('Chốt lương bao ngày ('+ten+')',[
           {tk:TK.RO_CHUNG,chieu:'NO',soTien:m},
-          {tk:TK.PHAI_TRA_THO,chieu:'CO',soTien:m,thoId}],{thoiDiem:(o.ngay||now())});});
+          {tk:TK.PHAI_TRA_THO,chieu:'CO',soTien:m,thoId}],td);
+        let mt=(i===n-1)?conLaiTra:Math.min(Math.round(donGia),conLaiTra);if(mt<0)mt=0;conLaiTra-=mt;
+        if(mt>0)ghi('Trả lương thợ',[
+          {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien:mt,thoId},{tk:TK.QUY,chieu:'CO',soTien:mt}],td);});
+      _traDan=true; /* đã trả dàn theo từng ngày → KHÔNG ghi cục ở dưới */
     } else {
       ghi('Chốt lương '+(kieu==='bao'?'bao ngày':'theo giờ')+' ('+ten+')',[
         {tk:TK.RO_CHUNG,chieu:'NO',soTien:payable},
         {tk:TK.PHAI_TRA_THO,chieu:'CO',soTien:payable,thoId}]);
     }
   }
-  if(tienTra>0)ghi('Trả lương thợ',[
+  if(tienTra>0&&!_traDan)ghi('Trả lương thợ',[
     {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien:tienTra,thoId},{tk:TK.QUY,chieu:'CO',soTien:tienTra}]);
   DB.chotBao.push({id:uid(),thoId,kieu,ngay:now(),denNgay:now(),donGia,soDVi,payable,giaTriCD,tienTra,ngayCong:ngayCong||null,danTrai:!!danTrai});
   Store.save();}
@@ -4497,7 +4490,7 @@ function dongBoChiPhiBao(thoId,quiet){try{
     ghi('Đồng bộ chi phí lương ('+t.ten+')',[
       {tk:TK.RO_CHUNG,chieu:'NO',soTien:traDu},
       {tk:TK.PHAI_TRA_THO,chieu:'CO',soTien:traDu,thoId}]);Store.save(); }
-  if(!quiet){drawChotSo();render();toastUndo('Đã đồng bộ — ghi bù chi phí, không trừ tiền lần nữa.');}
+  if(!quiet){modalThoChiTiet(thoId);render();toastUndo('Đã đồng bộ — ghi bù chi phí, không trừ tiền lần nữa.');}
 }catch(e){toast(e.message,true)}}
 /* ---- Bảng xếp hạng NĂNG SUẤT: điểm của từng thợ, cao → thấp ---- */
 /* ========== NĂNG SUẤT — 3 tab: Năng suất · Thưởng · Mục tiêu ==========
@@ -5110,6 +5103,13 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
       <div class="kv"><div class="k">Công đã tính sổ</div><div class="v">${roi.length} mục</div></div></div></div>`;}
   h+=`<div class="act-grid"><button class="btn btn-ghost" onclick="modalSoCongTho('${id}')">📋 Sổ công của thợ</button>
     <button class="btn btn-tape" onclick="modalChotSo('${id}')">🧾 Chốt sổ</button></div>`;
+  if(t.loai==='bao'){const _b=bal(TK.PHAI_TRA_THO,x=>x.thoId===id);const _traDu=Math.max(0,_b.no-_b.co);
+    if(_traDu>0)h+=`<div class="warn-box" style="display:flex;flex-direction:column;gap:9px;margin:10px 0 2px">
+      <div>🔄 <b>Lệch sổ:</b> có <b>${fmt(_traDu)}</b> đã trả trước qua “Trả lương” nhưng <b>chưa vào vốn</b> → lãi đang cao hơn thực.</div>
+      <button class="btn btn-sage btn-sm" style="width:100%" onclick="dongBoChiPhiBao('${id}')">Đồng bộ lại — ghi bù cho đúng lãi</button></div>`;
+    else h+=`<div class="card" style="margin:10px 0 2px"><div class="card-pad" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+      <div class="hint" style="margin:0">🔄 <b>Đồng bộ lại</b> — dò khoản đã trả qua “Trả lương” mà chưa vào vốn. Hiện <b>sổ khớp</b>, không có khoản lệch.</div>
+      <button class="btn btn-ghost btn-sm" style="width:100%;opacity:.55" onclick="dongBoChiPhiBao('${id}')">Sổ khớp — dò lại</button></div></div>`;}
   h+=`<div style="height:6px"></div><button class="btn btn-ghost" onclick="modalSuaTho('${id}')">✎ Sửa thông tin thợ</button>`;
   h+=`<div style="height:8px"></div><button class="btn btn-danger btn-sm" style="width:100%" onclick="confirmXoaTho('${id}')">🗑 Xóa thợ này</button>`;
   }
