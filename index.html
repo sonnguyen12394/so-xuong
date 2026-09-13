@@ -3212,7 +3212,7 @@ function modalNapQuyChi(){const c=quyChinh(),k=quyChi();openSheet('Nạp Quỹ p
     <div class="kv"><div class="k">Quỹ chính (rút ra)</div><div class="v">${fmt(c)}</div></div>
     <div class="kv"><div class="k">Quỹ phụ đang còn</div><div class="v">${fmt(k)}</div></div></div></div>
   <div class="field"><label>Số tiền nạp</label><input type="text" inputmode="numeric" class="sep" id="nq_sl" value="0" onfocus="this.select()"></div>
-  <div class="field"><label>Ngày nạp</label><input type="date" id="nq_ngay" value="${dayKey(now())}" max="${dayKey(now())}"></div>
+  <div class="field"><label>Ngày nạp</label><input type="date" id="nq_ngay" value="${gbsCtxNgay()}" max="${gbsToday()}" onchange="gbsSetNgay(this.value)"></div>
   <div class="field"><label>Ghi chú (không bắt buộc)</label><input id="nq_dg" placeholder="VD: Đổ quỹ chi đầu tuần"></div>
   <button class="btn btn-primary" onclick="submitNapQuyChi()">Nạp Quỹ phụ</button>
   <div style="height:8px"></div>
@@ -3330,6 +3330,11 @@ function submitDieuChinhQuy(which){try{const t=numVal('dc_sl');
 
 /* ---------- Ghi bổ sung cho ngày trước (Tổng quan → Chốt sổ) ---------- */
 function gbsToday(){const d=new Date();const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
+/* Ngày ghi dùng chung cho màn "Ghi khoản tiền": chọn 1 lần, mọi khoản mở ra lấy theo ngày này.
+   Là biến phiên (reload lại về hôm nay). Không bao giờ vượt quá hôm nay. */
+let gbsNgayChon=null;
+function gbsCtxNgay(){const t=gbsToday(); if(!gbsNgayChon||gbsNgayChon>t)gbsNgayChon=t; return gbsNgayChon;}
+function gbsSetNgay(v){const t=gbsToday(); if(v){gbsNgayChon=(v>t)?t:v;}}
 const GBS_TITLE={thu:'Thu tiền chủ hàng',bo:'Bỏ thêm tiền',chi:'Chi tiền xưởng',rut:'Rút tiền về nhà',tra:'Trả lương thợ',ung:'Ứng lương thợ',psth:'Phát sinh cho thợ',chidon:'Chi phí cho đơn',den:'Đền hàng hư',khac:'Chi khác (ship…)',congls:'Công thợ (lịch sử)',dtls:'Đơn cũ đã xong'};
 function modalGhiBoSung(preset,chuId){
   const _tit=(preset&&GBS_TITLE[preset])?GBS_TITLE[preset]:'Ghi khoản khác';
@@ -3339,9 +3344,9 @@ function modalGhiBoSung(preset,chuId){
   const opt=(v,txt,list)=>list?`<option value="${v}">${txt}</option>`:'';
   openSheet(_tit,`
   <div class="hint" style="margin-top:0;margin-bottom:12px">Ngày mặc định là <b>hôm nay</b>. Cần ghi bù ngày cũ thì đổi ô Ngày — số vào đúng ngày đó.</div>
-  <div class="field" id="gbs_ngayrow"><label>Ngày phát sinh</label><input type="date" id="gbs_ngay" value="${gbsToday()}" max="${gbsToday()}"></div>
+  <div class="field" id="gbs_ngayrow"><label>Ngày phát sinh</label><input type="date" id="gbs_ngay" value="${gbsCtxNgay()}" max="${gbsToday()}" onchange="gbsSetNgay(this.value)"></div>
   <div class="field" id="gbs_laprow" style="display:none"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0"><input type="checkbox" id="gbs_lap" style="width:20px;height:20px" onchange="gbsToggle()"><span>Lặp cho nhiều ngày (cùng số tiền mỗi ngày)</span></label></div>
-  <div class="field" id="gbs_turow" style="display:none"><label>Từ ngày → đến ngày</label><div style="display:flex;gap:8px"><input type="date" id="gbs_tu" value="${gbsToday()}" max="${gbsToday()}" style="flex:1"><input type="date" id="gbs_den" value="${gbsToday()}" max="${gbsToday()}" style="flex:1"></div></div>
+  <div class="field" id="gbs_turow" style="display:none"><label>Từ ngày → đến ngày</label><div style="display:flex;gap:8px"><input type="date" id="gbs_tu" value="${gbsCtxNgay()}" max="${gbsToday()}" style="flex:1"><input type="date" id="gbs_den" value="${gbsCtxNgay()}" max="${gbsToday()}" style="flex:1"></div></div>
   <div class="field" id="gbs_loairow"><label>Loại khoản</label>
     <select id="gbs_loai" onchange="gbsToggle()">
       <optgroup label="💵 Tiền vào két">
@@ -3389,17 +3394,30 @@ function modalGhiBoSung(preset,chuId){
 }
 /* Menu nút "Ghi khoản tiền" — 1 điểm vào duy nhất cho mọi khoản, mở lại modalGhiBoSung với loại chọn sẵn */
 function modalGhiTien(){
+  gbsSetNgay(csNgayDaiDien());
   const coTho=DB.tho.some(t=>!t.isOwner), coDon=DB.don.some(d=>d.trangThai!=='DA_HUY'), coChu=DB.chuHang.length>0;
   const B=(loai,ic,txt,cls)=>`<button class="btn ${cls||'btn-ghost'}" onclick="modalGhiBoSung('${loai}')">${ic?ic+' ':''}${txt}</button>`;
   const grp=t=>`<div style="font-weight:700;font-size:12.5px;color:var(--ink-2);margin:14px 2px 8px">${t}</div>`;
-  let h=`<div class="hint" style="margin-top:0;margin-bottom:2px">Chọn loại khoản. Khoản nào cũng ghi được cho <b>hôm nay</b> hay ngày cũ (đổi ô Ngày trong form).</div>`;
+  let h=`<div class="field" style="margin-bottom:8px"><label>📅 Ngày ghi cho các khoản dưới đây</label><input type="date" id="gbs_ctx_ngay" value="${gbsCtxNgay()}" max="${gbsToday()}" onchange="gbsSetNgay(this.value)"></div>`;
+  h+=`<div class="hint" style="margin-top:0;margin-bottom:2px">Đặt ngày một lần ở trên — mọi khoản bấm bên dưới sẽ ghi vào <b>ngày đó</b>. Vẫn đổi lại được trong từng form.</div>`;
   h+=grp('💵 Tiền ra vào két').replace('14px','8px');
   h+=`<div class="act-grid">${B('thu','💵','Thu tiền chủ hàng','btn-sage')}${B('chi','🧵','Chi tiền xưởng')}</div>`;
   h+=`<div style="height:8px"></div><div class="act-grid">${B('rut','🏠','Rút tiền về nhà')}${B('bo','➕','Bỏ thêm tiền')}</div>`;
   h+=`<div style="height:8px"></div><div class="act-grid"><button class="btn btn-ghost" onclick="modalNapQuyChi()">🧑‍💼 Nạp Quỹ phụ (nhân viên)</button></div>`;
   if(coTho){h+=grp('💰 Lương thợ');
     h+=`<div class="act-grid">${B('tra','','Trả lương')}${B('ung','','Ứng lương')}</div>`;
-    h+=`<div style="height:8px"></div><div class="act-grid">${B('psth','','Phát sinh (cơm/bồi dưỡng)')}${B('khac','','Chi khác (ship…)')}</div>`;}
+    h+=`<div style="height:8px"></div><div class="act-grid">${B('psth','','Phát sinh (cơm/bồi dưỡng)')}${B('khac','','Chi khác (ship…)')}</div>`;
+    const _gtTho=DB.tho.filter(t=>!t.isOwner);
+    if(_gtTho.length){
+      if(!_csSrTho||!_gtTho.some(t=>t.id===_csSrTho))_csSrTho=_gtTho[0].id;
+      const _gtOpts=_gtTho.map(t=>`<option value="${t.id}" ${t.id===_csSrTho?'selected':''}>${escHtml(t.ten)}${t.nghi?' (nghỉ)':''}</option>`).join('');
+      h+=`<div class="field" style="margin:12px 2px 6px"><label>Sổ thu chi riêng của thợ <span style="font-weight:600;color:var(--ink-3)">· không tính vào xưởng</span></label>
+        <select id="gt_sr_tho" onchange="_csSrTho=this.value">${_gtOpts}</select></div>
+      <div class="act-grid">
+        <button class="btn btn-ghost" onclick="ghiTienSoRieng('thu')">📥 Thu ngoài</button>
+        <button class="btn btn-ghost" onclick="ghiTienSoRieng('chi')">📤 Chi ngoài</button></div>`;
+    }
+  }
   else{h+=grp('👛 Khác');h+=`<div class="act-grid">${B('khac','','Chi khác (ship…)')}</div>`;}
   if(coDon){h+=grp('🧵 Gắn vào đơn');
     h+=`<div class="act-grid">${B('chidon','','Chi phí riêng mẫu')}${B('den','','Đền hàng hư')}</div>`;}
@@ -3456,6 +3474,7 @@ function submitGhiBoSung(keepOpen){try{
     return submitGhiBoSungLap(loai,s);
   const dstr=(el('gbs_ngay')||{}).value||'';
   if(!dstr)return toast('Chọn ngày phát sinh.',true);
+  gbsSetNgay(dstr);
   const p=dstr.split('-').map(Number),y=p[0],mo=p[1],dd=p[2];
   const ts=kmTs(dstr);
   if(ts>now())return toast('Không ghi cho ngày chưa tới.',true);
@@ -4051,6 +4070,22 @@ function ltDetail(loai){
     </div>`;}).join('')+`</div>`;
   body+=`<div class="hint" style="text-align:center">Bấm một dòng để xem chi tiết, hoàn tác hoặc sửa lại.</div>`;
   openSheet(ten,body);
+}
+let _csSrTho='';
+/* Ngày đại diện của kỳ Chốt sổ đang chọn (Ngày/Tuần/Tháng/Chọn ngày) — dùng làm ngày
+   mặc định cho các khoản ghi từ menu "Ghi khoản tiền". Lấy cuối kỳ, không vượt quá hôm nay. */
+function csNgayDaiDien(){
+  const P=perRange(csMode,csRef); const t=now();
+  let end=(P.to==null||!isFinite(P.to))?t:P.to;
+  if(end>t)end=t;
+  return dayKey(end);
+}
+/* Ghi khoản tiền → nhóm Lương thợ: chọn 1 thợ rồi ghi Thu/Chi riêng của thợ đó.
+   Sổ riêng KHÔNG đụng kế toán xưởng (không bút toán, không chạm két/Lãi/Chốt sổ). */
+function ghiTienSoRieng(loai){
+  const sel=el('gt_sr_tho'); const id=(sel&&sel.value)||_csSrTho;
+  if(!id)return toast('Chọn thợ trước.',true);
+  _csSrTho=id; _srLoai=loai; modalSoRieng(id,null,gbsCtxNgay());
 }
 function bcChotSo(){
   const data=csRows();
@@ -5774,13 +5809,13 @@ function modalSrCat(thoId,cat){
 }
 function srSetKy(ky,thoId){_srKy=ky;_srRef=0;_srTho=thoId||_srTho;modalThoChiTiet(thoId||_srTho);}
 function srNav(dir,thoId){if(_srKy==='all')return;const P=perRange(_srKy,_srRef);if(dir>0&&P.atNow)return;_srRef=perNav(_srKy,_srRef,dir);_srTho=thoId||_srTho;modalThoChiTiet(thoId||_srTho);}
-function srSetLoai(l){_srLoai=l;modalSoRieng(_srTho,_srId);}
-function modalSoRieng(thoId,id){
+function srSetLoai(l){_srLoai=l;const d=(el('sr_ngay')||{}).value||undefined;modalSoRieng(_srTho,_srId,d);}
+function modalSoRieng(thoId,id,defNgay){
   _srTho=thoId||null; _srId=id||null;
   const t=getTho(thoId);
   const r=id?srList().find(x=>x.id===id):null;
   const tien=r?r.soTien:''; const dg=r?(r.dienGiai||''):'';
-  const ngay=r?new Date(r.thoiDiem):new Date();
+  const ngay=r?new Date(r.thoiDiem):(defNgay?new Date(defNgay+'T12:00:00'):new Date());
   const p=n=>String(n).padStart(2,'0');
   const ngayStr=ngay.getFullYear()+'-'+p(ngay.getMonth()+1)+'-'+p(ngay.getDate());
   const maxNgay=ngayStr>kmToday()?ngayStr:kmToday();
