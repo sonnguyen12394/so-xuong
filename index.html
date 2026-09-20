@@ -4048,8 +4048,12 @@ const LT_META={thu:['💵','Tiền chủ hàng đưa',false],thukhac:['💵','Kh
   cpxuong:['🧾','Chi phí xưởng',true],luong:['👛','Trả / ứng lương thợ',true],
   psth:['🍚','Cơm, bồi dưỡng thợ',true],chidon:['🧾','Chi phí đơn (ship…)',true],chiden:['💸','Đền hàng hư',true],chikhac:['🧾','Chi khác (ship, đền…)',true],
   vonvao:['🏠','Bỏ thêm vốn vào xưởng',false],vonra:['🏠','Rút tiền về nhà',true],dauky:['🏁','Số dư đầu kỳ',false]};
+let _ltDetMode='ngay',_ltLoaiCur='',_ltGopOpen={};
+function ltDetMode(m){_ltDetMode=m;ltDetail(_ltLoaiCur);}
+function ltGopTgl(i){_ltGopOpen[i]=!_ltGopOpen[i];ltDetail(_ltLoaiCur);}
 function ltDetail(loai){
   const meta=LT_META[loai];if(!meta)return;const ic=meta[0],ten=meta[1],neg=meta[2];
+  if(loai!==_ltLoaiCur){_ltLoaiCur=loai;_ltDetMode='ngay';_ltGopOpen={};}   // mở loại mới -> về mặc định "theo ngày"
   const P=ltPeriod();
   const inKy=(t)=>t>=P.from&&t<=P.to;
   const byKey={};
@@ -4063,16 +4067,32 @@ function ltDetail(loai){
   const phu=(bt)=>{for(const d of bt.dong){if(d.chuHangId&&getChu(d.chuHangId))return getChu(d.chuHangId).ten;if(d.thoId&&getTho(d.thoId))return getTho(d.thoId).ten;}return '';};
   const dg=(bt)=>{const s=bt.suKien||'';const m=s.split(/:|·/);return m.length>1?m.slice(1).join('·').trim():'';};
   const kyLbl=P.label;
+  const slip=(r,pad)=>{const bt=r.bt;const d=new Date(r.t).toLocaleDateString('vi-VN');
+    const p=phu(bt),g=dg(bt);const sub=[d,g].filter(Boolean).join(' · ');
+    return `<div class="slip" onclick="modalOp('${r.key}')" ${pad?'style="padding-left:22px;background:var(--line-2)"':''}>
+      <div><div class="who" style="font-size:14px">${pad?d:(p||g||ten)}</div><div class="meta">${pad?(g||''):(sub||d)}</div></div>
+      <div style="text-align:right;white-space:nowrap"><div class="big-num ${neg?'money-neg':'money-pos'}" style="font-size:14px">${neg?'− ':'+ '}${fmtShort(r.tien)}</div><span style="color:var(--ink-3)"> ›</span></div>
+    </div>`;};
   let body=`<div style="margin:-4px 0 10px"><div style="font-weight:700">${ic} ${ten}</div>
     <div style="font-size:12.5px;color:var(--ink-2)">${kyLbl} · ${rows.length} lần · <b class="${neg?'money-neg':'money-pos'}">${neg?'− ':'+ '}${fmt(tong)}</b></div></div>`;
+  body+=`<div class="chipset" style="margin-bottom:10px">
+    <div class="chip ${_ltDetMode==='ngay'?'sel':''}" onclick="ltDetMode('ngay')">📅 Theo ngày</div>
+    <div class="chip ${_ltDetMode==='gop'?'sel':''}" onclick="ltDetMode('gop')">🧮 Gộp theo tên</div></div>`;
   if(!rows.length){body+=`<div class="empty"><div class="ic">🗒️</div><b>Chưa có khoản nào</b>Kỳ này chưa ghi mục này.</div>`;openSheet(ten,body);return;}
-  body+=`<div class="card">`+rows.map(r=>{const bt=r.bt;const d=new Date(r.t).toLocaleDateString('vi-VN');
-    const p=phu(bt),g=dg(bt);const sub=[d,g].filter(Boolean).join(' · ');
-    return `<div class="slip" onclick="modalOp('${r.key}')">
-      <div><div class="who" style="font-size:14px">${p||g||ten}</div><div class="meta">${sub||d}</div></div>
-      <div style="text-align:right;white-space:nowrap"><div class="big-num ${neg?'money-neg':'money-pos'}" style="font-size:14px">${neg?'− ':'+ '}${fmtShort(r.tien)}</div><span style="color:var(--ink-3)"> ›</span></div>
-    </div>`;}).join('')+`</div>`;
-  body+=`<div class="hint" style="text-align:center">Bấm một dòng để xem chi tiết, hoàn tác hoặc sửa lại.</div>`;
+  if(_ltDetMode==='ngay'){
+    body+=`<div class="card">`+rows.map(r=>slip(r,false)).join('')+`</div>`;
+  } else {
+    const gkey=(bt)=>phu(bt)||dg(bt)||ten;
+    const gmap={};rows.forEach(r=>{const k=gkey(r.bt);(gmap[k]=gmap[k]||{k,tien:0,items:[]}).tien+=r.tien;gmap[k].items.push(r);});
+    const gl=Object.values(gmap).sort((a,b)=>b.tien-a.tien||a.k.localeCompare(b.k));
+    body+=`<div class="card">`+gl.map((g,i)=>{const open=!!_ltGopOpen[i];
+      let hh=`<div class="slip" onclick="ltGopTgl(${i})">
+        <div><div class="who" style="font-size:14px;font-weight:700">${escHtml(g.k)}</div><div class="meta">${g.items.length} lần</div></div>
+        <div style="text-align:right;white-space:nowrap"><div class="big-num ${neg?'money-neg':'money-pos'}" style="font-size:14px">${neg?'− ':'+ '}${fmtShort(g.tien)}</div><span style="color:var(--ink-3)"> ${open?'⌄':'›'}</span></div></div>`;
+      if(open)hh+=g.items.map(r=>slip(r,true)).join('');
+      return hh;}).join('')+`</div>`;
+  }
+  body+=`<div class="hint" style="text-align:center">${_ltDetMode==='gop'?'Bấm một tên để xổ ra các ngày; bấm ngày để sửa/hoàn tác.':'Bấm một dòng để xem chi tiết, hoàn tác hoặc sửa lại.'}</div>`;
   openSheet(ten,body);
 }
 let _csSrTho='';
