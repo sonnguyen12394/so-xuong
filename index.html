@@ -1074,13 +1074,16 @@ function thuTien({chuHangId,soTien,uuTien,ngay}){beginOp();
   if(du>0) lines.push({tk:TK.PHAI_THU,chieu:'CO',soTien:du,chuHangId,phieuGiaoId:'UNG-'+chuHangId});
   ghi('Chủ hàng trả tiền',lines,ngay?{thoiDiem:ngay}:null);Store.save();return {alloc,du};
 }
-function traLuong({thoId,soTien,ngay,quy='chi'}){beginOp();
+function traLuong({thoId,soTien,ngay,quy='chi'}){const t=getTho(thoId);const bao=t&&t.loai==='bao';beginOp();
   ghi('Trả lương thợ',[
-    {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien,thoId},{tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);Store.save();
+    bao?{tk:TK.RO_CHUNG,chieu:'NO',soTien,thoId,loai:'LUONG_BAO'}   // thợ bao: trả tiền = vào giá vốn luôn (1 dòng)
+       :{tk:TK.PHAI_TRA_THO,chieu:'NO',soTien,thoId},
+    {tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
-function ungLuong({thoId,soTien,ngay,quy='chi'}){beginOp();
+function ungLuong({thoId,soTien,ngay,quy='chi'}){const t=getTho(thoId);const bao=t&&t.loai==='bao';beginOp();
   ghi('Ứng lương thợ',[
-    {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien,thoId},{tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);Store.save();
+    bao?{tk:TK.RO_CHUNG,chieu:'NO',soTien,thoId,loai:'LUONG_BAO'}:{tk:TK.PHAI_TRA_THO,chieu:'NO',soTien,thoId},
+    {tk:TK.QUY,chieu:'CO',soTien,quy}],ngay?{thoiDiem:ngay}:null);Store.save();
 }
 /* chủ rút tiền về nhà / bỏ thêm tiền vào xưởng — chạm VỐN, KHÔNG phải chi phí */
 function rutVon({soTien,dienGiai,ngay}){beginOp();
@@ -3785,6 +3788,7 @@ function csItemLabel(s){
 /* Phân loại 1 bút toán vào 1 nhóm hiển thị. Trả null = bỏ qua (nội bộ). */
 function csGroupOf(bt){
   if(bt.dao_cua||bt.daDao)return null;               /* bỏ bút toán đảo & bản đã sửa */
+  if(bt.noiBo)return null;                            /* ghi vốn nội bộ (thợ bao) — vào giá vốn nhưng không hiện ở nhật ký */
   const s=bt.suKien;
   /* backfill "nhập lại lịch sử" (đơn cũ đã xong ngoài app) KHÔNG phải thu/chi phát sinh trong ngày
      → không liệt vào Sổ thu chi. Nợ lương thợ / doanh thu vẫn nằm nguyên ở Thợ · Chủ hàng · Lãi. */
@@ -4357,18 +4361,21 @@ function baoDaTra(thoId){let s=0;                                    // (net, m�
   for(const bt of DB.butToan){ if(!_baoLaTraLine(bt))continue;
     for(const d of bt.dong){ if(d.tk===TK.PHAI_TRA_THO&&d.thoId===thoId)s+=(d.chieu==='NO'?1:-1)*(d.soTien||0); } }
   return Math.max(0,s);}
-/* TIỀN THỰC ĐÃ TRẢ (nguồn CHUẨN — KHỚP "Tiền vào (thu)"): phiếu Trả/Ứng CHƯA đảo, trong kỳ mốc→nay.
-   Dùng chung cho: tô lịch, card "đã trả", còn nợ → 3 chỗ luôn bằng nhau và bằng sổ thu. */
-function baoTienDaTra(thoId){return luongXuongThoRange(thoId,baoStartTs(thoId),now());}
+/* TIỀN THỰC ĐÃ TRẢ (thợ bao) = Σ các dòng "Trả/Ứng lương" hiện trên nhật ký (Nợ Rổ chung · LUONG_BAO),
+   chưa đảo, trong kỳ mốc→nay. NHẬT KÝ LÀ GỐC: xoá dòng nào thì số này đổi theo. */
+function baoTienDaTra(thoId){let s=0;const from=baoStartTs(thoId),to=now();
+  for(const bt of DB.butToan){if(bt.dao_cua||bt.daDao)continue;if(bt.thoiDiem<from||bt.thoiDiem>to)continue;
+    for(const d of bt.dong)if(d.tk===TK.RO_CHUNG&&d.chieu==='NO'&&d.thoId===thoId&&d.loai==='LUONG_BAO')s+=d.soTien;}
+  return s;}
 /* Tiền đã trả ĐÃ PHÂN BỔ vào ngày công (khớp lịch): mỗi ngày cấn tối đa 1 đơn giá. */
 function baoDaTraNgay(thoId){const {paid,dg}=baoPaidByDay(thoId);let s=0;
   for(const k in paid){const v=Math.max(0,paid[k]||0);s+=dg>0?Math.min(v,dg):v;}return s;}
 /* Tiền trả DÔI ngoài ngày công (trả trùng ngày / ngoài mốc / ứng trước) = tổng thực − phần cấn ngày. */
 function baoTraDoi(thoId){return Math.max(0,baoTienDaTra(thoId)-baoDaTraNgay(thoId));}
-function baoDaGhiVon(thoId){return bal(TK.PHAI_TRA_THO,d=>d.thoId===thoId).co;}      // đã ghi vốn = accrual (CO)
+function baoDaGhiVon(thoId){return baoTienDaTra(thoId);}      // mô hình mới: trả lương = vào giá vốn luôn → đã ghi vốn = đã trả
 function baoLuongPhatSinh(thoId){const t=getTho(thoId);return (t.donGiaNgay||0)*soNgayBao(thoId);} // = ngày công × đơn giá
 function baoConNo(thoId){return baoLuongPhatSinh(thoId)-baoTienDaTra(thoId);}          // còn nợ = phát sinh − tiền thực trả
-function baoVonChuaGhi(thoId){return baoLuongPhatSinh(thoId)-baoDaGhiVon(thoId);}    // vốn chưa ghi = phát sinh − đã ghi vốn
+function baoVonChuaGhi(thoId){return 0;}                      // không còn "vốn chưa ghi" (ghi ngay khi trả); phần chưa trả xem ở "Còn nợ"
 function soNgayBao(thoId){return baoNgayCong(thoId).list.length;}
 /* ===== TIỀN TRẢ GẮN THEO NGÀY (thợ bao) — nguồn DUY NHẤT để tô màu lịch, một chiều =====
    Mỗi phiếu Trả/Ứng gắn nhãn phanBoNgay:[{k,amt}] trên DÒNG PHAI_TRA_THO (không phải cả bút toán).
@@ -4478,7 +4485,6 @@ function modalChamCong(thoId){ thoId=thoId||_ccTho; if(_ccTho!==thoId)_ccRef=0; 
     <div class="kv"><div class="k">Còn nợ<br><small style="color:var(--ink-3)">phát sinh − đã trả</small></div><div class="v big-num ${conNo>0?'money-neg':'money-pos'}">${fmt(conNo)}</div></div>
     ${chuaVon>0?`<div class="kv"><div class="k">Vốn chưa ghi<br><small style="color:var(--ink-3)">chốt sổ để đưa vào giá vốn</small></div><div class="v money-neg">${fmt(chuaVon)}</div></div>`:''}</div></div>`;
   h+=`<button class="btn btn-sage" style="width:100%;margin-top:4px" onclick="modalTraLuong('${thoId}')">💵 Trả lương (tiền ra)</button>`;
-  h+=`<button class="btn btn-ghost" style="width:100%;margin-top:8px" onclick="modalChotSo('${thoId}')">🧾 Chốt sổ · ghi vốn</button>`;
   openSheet('Bảng chấm công · '+t.ten,h);
 }
 function ccNav(dir){ if(dir>0&&_ccRef>=0)return; _ccRef+=dir; modalChamCong(_ccTho); }
@@ -4523,22 +4529,17 @@ function drawChotSo(){const t=getTho(csState.thoId);const wm=baoWatermark(csStat
       <button class="btn btn-sage wide" onclick="submitChotSoSP('${csState.thoId}')">Chốt & ghi đã trả</button>`;
   } else if(kieu==='bao'){
     const W=soNgayBao(csState.thoId);const dgv=t.donGiaNgay||0;
-    const phatSinh=W*dgv;const daVon=baoDaGhiVon(csState.thoId);const chuaVon=phatSinh-daVon;
+    const phatSinh=W*dgv;
     const daTra=baoDaTraNgay(csState.thoId);const conNo=Math.max(0,phatSinh-daTra);
-    h+=`<div class="hint" style="margin:-2px 0 8px">Thợ bao: <b>chốt sổ = ghi vốn</b> (đưa lương đã phát sinh vào giá vốn). <b>Không trả tiền ở đây</b> — trả tiền dùng nút <b>Trả lương</b>. Số ngày lấy từ <b>Bảng chấm công</b>.</div>
+    h+=`<div class="hint" style="margin:-2px 0 8px">Thợ bao: <b>trả lương là ghi thẳng vào giá vốn</b> — mỗi lần trả là <b>1 dòng nhật ký</b> (vừa ra tiền vừa tính chi phí). Không cần chốt riêng. Số ngày lấy từ <b>Bảng chấm công</b>.</div>
       <div class="card"><div class="card-pad">
         <div class="kv"><div class="k">Ngày công (chấm công)</div><div class="v"><b>${W}</b> × ${fmt(dgv)}</div></div>
         <div class="kv"><div class="k">Lương phát sinh</div><div class="v big-num">${fmt(phatSinh)}</div></div>
-        <div class="kv"><div class="k">Đã ghi vốn</div><div class="v">${fmt(daVon)}</div></div>
-        <div class="kv"><div class="k">Vốn chưa ghi</div><div class="v big-num ${chuaVon>0?'money-neg':'money-pos'}" id="cs_pay">${fmt(chuaVon)}</div></div>
         <div class="cs-stat-div" style="margin:6px 0"></div>
         <div class="kv"><div class="k">Đã trả tiền</div><div class="v money-pos">${fmt(daTra)}</div></div>
         <div class="kv"><div class="k">Còn nợ</div><div class="v ${conNo>0?'money-neg':'money-pos'}">${fmt(conNo)}</div></div></div></div>
       <button class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:10px" onclick="_ccRef=0;modalChamCong('${csState.thoId}')">📅 Bảng chấm công · sửa ngày</button>
-      ${chuaVon>0
-        ?`<button class="btn btn-sage wide" onclick="ghiVonBao('${csState.thoId}')">Ghi vốn ${fmt(chuaVon)} vào giá vốn</button>`
-        :`<div class="alert-strip as-green" style="border-radius:12px;margin-bottom:8px"><b>✓ Đã ghi vốn đủ tới hôm nay.</b></div>`}
-      <button class="btn btn-ghost wide" style="margin-top:8px" onclick="modalTraLuong('${csState.thoId}')">💵 Trả lương (tiền ra)</button>`;
+      <button class="btn btn-sage wide" onclick="modalTraLuong('${csState.thoId}')">💵 Trả lương (tiền ra)</button>`;
   } else {const gioMac=soGioChua(csState.thoId,wm);
     h+=`<div class="card"><div class="card-pad">
       <div style="display:flex;gap:8px"><div class="field" style="margin:0;flex:1"><label>Đơn giá / giờ</label><input type="text" inputmode="numeric" class="sep" id="cs_dg" value="${sepStr(t.donGiaGio||0)}" oninput="csCalc()" onfocus="this.select()"></div>
@@ -4622,10 +4623,15 @@ function autoGhiVonBao(thoId){try{const t=getTho(thoId);if(!t||t.loai!=='bao')re
     if(off.has(k)&&!act.has(k))continue;if(done.has(k))continue;chua.push({key:k,ngay:d});}
   chua.reverse();                                                                    // cũ -> mới
   const nDu=Math.min(chua.length,Math.floor(traDu/dg));if(nDu<1)return;
-  const days=chua.slice(0,nDu);                                                       // ngày cũ nhất chưa chốt
-  chotSoBao({thoId,kieu:'bao',donGia:dg,soDVi:nDu,payable:nDu*dg,                      // payable CHẶN = nDu×dg, không lấy cả trả dư
-    giaTriCD:soCongTong(thoId,baoWatermark(thoId)),tienTra:0,
-    ngayCong:days.map(d=>d.key),ngayObjs:days.map(d=>({key:d.key,ngay:d.ngay})),danTrai:true});
+  const days=chua.slice(0,nDu);const amt=nDu*dg;                                      // CHẶN overpay: tối đa = số ngày chưa chốt × dg
+  beginOp();
+  ghi('Ghi vốn lương bao ('+t.ten+')',[                                              // NỘI BỘ: vào giá vốn (Rổ chung), KHÔNG hiện ở nhật ký (đã có dòng "trả lương")
+    {tk:TK.RO_CHUNG,chieu:'NO',soTien:amt},
+    {tk:TK.PHAI_TRA_THO,chieu:'CO',soTien:amt,thoId}],{noiBo:true});
+  DB.chotBao=DB.chotBao||[];
+  DB.chotBao.push({id:uid(),thoId,kieu:'bao',ngay:now(),denNgay:now(),donGia:dg,soDVi:nDu,payable:amt,
+    giaTriCD:soCongTong(thoId,baoWatermark(thoId)),tienTra:0,ngayCong:days.map(d=>d.key),danTrai:true});
+  Store.save();
 }catch(e){}}
 /* ĐỒNG BỘ LẠI (thợ bao ngày): phần đã trả bằng "Trả lương" chỉ ra tiền, CHƯA ghi vốn →
    ghi bù chi phí (Nợ Rổ chung / Có Nợ lương thợ) dàn ĐÚNG từng ngày cũ nhất, đánh dấu
@@ -5269,13 +5275,10 @@ function modalThoChiTiet(id){const t=getTho(id);const ns=nangSuat(id);
     h+=`<div class="card"><div class="card-pad">
       <div class="kv"><div class="k">Công chưa tính sổ</div><div class="v money-neg">${fmt(chuaTong)} · ${chua.length} mục</div></div>
       <div class="kv"><div class="k">Công đã tính sổ</div><div class="v">${roi.length} mục</div></div></div></div>`;}
-  h+=`<div class="act-grid"><button class="btn btn-ghost" onclick="modalSoCongTho('${id}')">📋 Sổ công của thợ</button>
+  h+=t.loai==='bao'
+    ?`<button class="btn btn-ghost" style="width:100%" onclick="modalSoCongTho('${id}')">📋 Sổ công của thợ</button>`
+    :`<div class="act-grid"><button class="btn btn-ghost" onclick="modalSoCongTho('${id}')">📋 Sổ công của thợ</button>
     <button class="btn btn-tape" onclick="modalChotSo('${id}')">🧾 Chốt sổ</button></div>`;
-  if(t.loai==='bao'){const chuaVon=baoVonChuaGhi(id);
-    if(chuaVon>0)h+=`<div class="warn-box" style="display:flex;flex-direction:column;gap:9px;margin:10px 0 2px">
-      <div>📊 <b>Vốn chưa ghi:</b> <b>${fmt(chuaVon)}</b> — lương đã phát sinh theo chấm công nhưng <b>chưa vào giá vốn</b> → lãi đang cao hơn thực.</div>
-      <button class="btn btn-sage btn-sm" style="width:100%" onclick="ghiVonBao('${id}')">Ghi vốn — đưa vào giá vốn cho đúng lãi</button></div>`;
-    else h+=`<div class="card" style="margin:10px 0 2px"><div class="card-pad" style="padding:12px 14px"><div class="hint" style="margin:0">📊 <b>Đã ghi vốn đủ</b> tới hôm nay — lương phát sinh khớp với giá vốn.</div></div></div>`;}
   h+=`<div style="height:6px"></div><button class="btn btn-ghost" onclick="modalSuaTho('${id}')">✎ Sửa thông tin thợ</button>`;
   h+=`<div style="height:8px"></div><button class="btn btn-danger btn-sm" style="width:100%" onclick="confirmXoaTho('${id}')">🗑 Xóa thợ này</button>`;
   }
@@ -5472,39 +5475,42 @@ function askXoaDonLS(btId){const bt=DB.butToan.find(b=>b.id===btId);if(!bt)retur
     if(locked)return toast('Ngày đã khóa sổ — không xóa được.',true);
     beginOp();daoButToan(btId,'xóa đơn lịch sử');closeSheet();render();toast('Đã xóa đơn khỏi sổ.');
   }catch(e){toast(e.message,true)}},{ok:'Xóa',nguyHiem:true,title:'Xóa đơn lịch sử'});}
-function modalTraLuong(thoId){const t=getTho(thoId);const no=thoConThieu(t);const isBao=t.loai==='bao';
+function modalTraLuong(thoId){const t=getTho(thoId);const no=thoConThieu(t);const isBao=t.loai==='bao';_tlQuy='chinh';
   openSheet('Trả lương — '+t.ten,`
   <div class="field"><label>Số tiền trả</label><input type="text" inputmode="numeric" class="sep" id="tl_sl" value="${sepStr(no>0?lamTronLe(no):0)}" onfocus="this.select()"></div>
-  <div class="hint" style="margin-bottom:${isBao?'12':'14'}px">Đang nợ lương ${fmt(Math.max(0,no))}.</div>
+  <div class="hint" style="margin-bottom:10px">Đang nợ lương ${fmt(Math.max(0,no))}.</div>
+  <label style="display:block;font-size:12px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Trả từ quỹ nào</label>
+  <div class="chipset" style="margin-bottom:14px">
+    <div class="chip sel" id="tlq_chinh" onclick="tlPickQuy('chinh')">💼 Quỹ chính</div>
+    <div class="chip" id="tlq_chi" onclick="tlPickQuy('chi')">🧑‍💼 Quỹ phụ</div></div>
   ${isBao?`<label style="display:flex;align-items:flex-start;gap:9px;padding:10px 12px;margin-bottom:14px;background:var(--sage-soft);border-radius:12px;cursor:pointer;font-size:13px;line-height:1.4">
     <input type="checkbox" id="tl_dantrai" ${DB.settings&&DB.settings.danTraiBao?'checked':''} onchange="csSetDanTrai(this.checked)" style="width:18px;height:18px;flex:none;margin-top:1px">
     <span><b>Dàn trải ra từng ngày công</b> — mỗi ngày một dòng, ghi đúng ngày làm (VD 3 ngày × ${fmt(t.donGiaNgay||0)}). Bỏ tích thì dồn 1 cục hôm nay.</span></label>`:''}
   <button class="btn btn-primary" onclick="submitTraLuong('${thoId}')">Ghi trả lương</button>`);}
+let _tlQuy='chinh';
+function tlPickQuy(v){_tlQuy=v;const a=el('tlq_chinh'),b=el('tlq_chi');if(a)a.classList.toggle('sel',v==='chinh');if(b)b.classList.toggle('sel',v==='chi');}
 function submitTraLuong(thoId){try{const s=numVal('tl_sl');if(s<=0)return toast('Nhập số tiền.',true);
-  const t=getTho(thoId);const isBao=t&&t.loai==='bao';
+  const t=getTho(thoId);const isBao=t&&t.loai==='bao';const quy=_tlQuy==='chi'?'chi':'chinh';
   const dan=!!(el('tl_dantrai')&&el('tl_dantrai').checked)&&isBao;
-  if(dan)traLuongDanTrai(thoId,s); else if(isBao)traLuongCucBao(thoId,s); else traLuong({thoId,soTien:s});
-  if(isBao)autoGhiVonBao(thoId);                        // trả tới đâu, ghi vốn tới đó — hết gap "trả mà chưa nhập sổ"
-  closeSheet();render();toastUndo('Đã ghi trả lương'+(dan?' (dàn theo ngày)':'')+'.');}catch(e){toast(e.message,true)}}
+  if(dan)traLuongDanTrai(thoId,s,quy); else if(isBao)traLuongCucBao(thoId,s,quy); else traLuong({thoId,soTien:s,quy});
+  closeSheet();render();toastUndo('Đã ghi trả lương'+(dan?' (dàn theo ngày)':'')+' · '+(quy==='chi'?'Quỹ phụ':'Quỹ chính')+'.');}catch(e){toast(e.message,true)}}
 /* Trả lương DÀN TRẢI (thợ bao): chia tổng tiền thành từng ngày công (ghi ĐÚNG ngày làm),
    bắt đầu từ ngày công cũ nhất CHƯA trả đủ. Tổng "đã trả" y hệt trả 1 cục — chỉ khác cách ghi ngày.
    Là MỘT thao tác (hoàn tác được). KHÔNG suy ngược ra số ngày. */
-function traLuongDanTrai(thoId,tong){const t=getTho(thoId);const dg=t.donGiaNgay||0;
-  if(dg<=0||tong<=0){return traLuong({thoId,soTien:tong});}
+function traLuongDanTrai(thoId,tong,quy='chinh'){const t=getTho(thoId);const dg=t.donGiaNgay||0;
+  if(dg<=0||tong<=0){return traLuong({thoId,soTien:tong,quy});}
   const {items,overflow}=baoPhanBoTra(thoId,tong);   // ngày cũ nhất còn thiếu -> mỗi ngày một dòng
   beginOp();
   items.forEach(it=>{ghi('Trả lương thợ',[
-    {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien:it.amt,thoId,phanBoNgay:[{k:it.k,amt:it.amt}]},
-    {tk:TK.QUY,chieu:'CO',soTien:it.amt}],{thoiDiem:it.ngay+43200000});});
-  if(overflow>0)ghi('Trả lương thợ',[   // trả dư quá số ngày công = ứng dư, ghi hôm nay, không gắn ngày
-    {tk:TK.PHAI_TRA_THO,chieu:'NO',soTien:overflow,thoId},
-    {tk:TK.QUY,chieu:'CO',soTien:overflow}],{thoiDiem:now()});
+    {tk:TK.RO_CHUNG,chieu:'NO',soTien:it.amt,thoId,loai:'LUONG_BAO'},
+    {tk:TK.QUY,chieu:'CO',soTien:it.amt,quy}],{thoiDiem:it.ngay+43200000});});
+  if(overflow>0)ghi('Trả lương thợ',[   // trả dư quá số ngày công = vẫn ra tiền, ghi hôm nay
+    {tk:TK.RO_CHUNG,chieu:'NO',soTien:overflow,thoId,loai:'LUONG_BAO'},
+    {tk:TK.QUY,chieu:'CO',soTien:overflow,quy}],{thoiDiem:now()});
   Store.save();}
-/* Trả 1 CỤC (thợ bao): một bút toán ghi hôm nay, nhưng GẮN nhãn các ngày cũ nhất chưa trả để tô đúng ô. */
-function traLuongCucBao(thoId,s){const {items}=baoPhanBoTra(thoId,s);const sr=Math.round(s);beginOp();
-  const noLine={tk:TK.PHAI_TRA_THO,chieu:'NO',soTien:sr,thoId};
-  if(items.length)noLine.phanBoNgay=items.map(it=>({k:it.k,amt:it.amt}));
-  ghi('Trả lương thợ',[noLine,{tk:TK.QUY,chieu:'CO',soTien:sr}]);Store.save();}
+/* Trả 1 CỤC (thợ bao): một dòng nhật ký, ghi hôm nay. */
+function traLuongCucBao(thoId,s,quy='chinh'){const sr=Math.round(s);beginOp();
+  ghi('Trả lương thợ',[{tk:TK.RO_CHUNG,chieu:'NO',soTien:sr,thoId,loai:'LUONG_BAO'},{tk:TK.QUY,chieu:'CO',soTien:sr,quy}]);Store.save();}
 function modalUng(thoId){const b=bal(TK.PHAI_TRA_THO,d=>d.thoId===thoId);const conLai=b.co-b.no;
   openSheet('Ứng lương — '+getTho(thoId).ten,`
   <div class="field"><label>Số tiền ứng trước</label><input type="text" inputmode="numeric" class="sep" id="ul_sl" value="0" onfocus="this.select()" oninput="ulWarn('${thoId}')"></div>
@@ -5520,7 +5526,6 @@ function confirmTraHet(){openSheet('Trả hết lương',`
   <div class="hint" style="margin-bottom:14px">Trả toàn bộ lương đang nợ cho tất cả thợ. Chỉ làm khi két đủ tiền.</div>
   <button class="btn btn-sage" onclick="doTraHet()">Xác nhận trả hết</button>`);}
 function doTraHet(){DB.tho.filter(t=>!t.isOwner).forEach(t=>{const no=thoConThieu(t);if(no>0)traLuong({thoId:t.id,soTien:no});});
-  DB.tho.filter(t=>!t.isOwner&&t.loai==='bao').forEach(t=>autoGhiVonBao(t.id));   // ghi vốn cho phần vừa trả
   closeSheet();render();toast('Đã trả hết lương đang nợ.');}
 
 /* ---- Xuất / nhập dữ liệu ---- */
@@ -6908,9 +6913,31 @@ function migrateQuyChi(){if(!DB||!DB.butToan)return false;let ch=false;
     }
   }
   return ch;}
+function migrateBaoGiaVon(){                     // NHẬT KÝ LÀ GỐC cho thợ bao: 1 dòng trả lương = tiền + giá vốn.
+  if(!DB||!DB.butToan||!DB.tho)return false;
+  if(DB.settings&&DB.settings._baoGiaVonV1)return false;   // chạy 1 lần
+  const baoIds=new Set(DB.tho.filter(t=>t.loai==='bao').map(t=>t.id));
+  const accRE=/^(Đảo:\s*)?(Chốt lương bao ngày|Ghi vốn lương bao|Đồng bộ chi phí lương)/;
+  const traRE=/^(Đảo:\s*)?(Trả lương|Ứng lương)/;
+  const keep=[];
+  for(const bt of DB.butToan){const s=bt.suKien||'';
+    const forBao=bt.dong.some(d=>d.thoId&&baoIds.has(d.thoId));
+    if(accRE.test(s)&&forBao)continue;            // XOÁ accrual/ghi-vốn cũ của thợ bao (gồm phần dư & ghi ngầm)
+    if(traRE.test(s)&&forBao){                     // CHUYỂN phiếu trả/ứng của thợ bao: Nợ Phải-trả-thợ -> Nợ Rổ chung + LUONG_BAO
+      bt.dong.forEach(d=>{if(d.tk===TK.PHAI_TRA_THO&&baoIds.has(d.thoId)){d.tk=TK.RO_CHUNG;d.loai='LUONG_BAO';}
+        if(d.phanBoNgay)delete d.phanBoNgay;});
+    }
+    keep.push(bt);
+  }
+  DB.butToan=keep;
+  DB.chotBao=(DB.chotBao||[]).filter(c=>!baoIds.has(c.thoId));
+  (DB.settings=DB.settings||(DB.settings={})),(DB.settings._baoGiaVonV1=1);
+  return true;
+}
 function migrateLo(){let ch=false;
   if(DB&&DB.don)for(const d of DB.don){if(!d.maLo){d.maLo=d.ma||('ĐH-'+d.id);ch=true;}}
   if(migrateQuyChi())ch=true;
+  if(migrateBaoGiaVon())ch=true;
   return ch;}
 function loadLocalOrSeed(){const saved=Store.load();window._cuMoi=false;
   if(saved&&saved.don&&saved.schema===SCHEMA){DB=saved;if(!DB.settings)DB.settings={tyLeChung:0.15,view:'don'};
