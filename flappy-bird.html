@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>Chim Bay — Flappy Bird</title>
+<style>
+  :root{
+    --sky-top:#4ec0e0;
+    --accent:#f9c22e;
+    --ink:#3a2c1a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:#111820;
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:100dvh;
+    overflow:hidden;
+    color:#fff;
+    user-select:none;
+  }
+  #wrap{
+    position:relative;
+    width:min(100vw,440px);
+    height:min(100dvh,720px);
+    max-width:100vw;
+    max-height:100dvh;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);
+    border-radius:14px;
+    overflow:hidden;
+  }
+  canvas{
+    display:block;
+    width:100%;
+    height:100%;
+    touch-action:none;
+    background:linear-gradient(#4ec0e0,#8fd6ea 60%,#ded895);
+  }
+  /* Overlay UI */
+  .overlay{
+    position:absolute;
+    inset:0;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:18px;
+    text-align:center;
+    padding:24px;
+    background:rgba(15,25,35,.55);
+    backdrop-filter:blur(3px);
+    transition:opacity .25s;
+    z-index:5;
+  }
+  .overlay.hidden{opacity:0;pointer-events:none;}
+  .title{
+    font-size:clamp(30px,9vw,46px);
+    font-weight:800;
+    letter-spacing:1px;
+    color:var(--accent);
+    text-shadow:0 3px 0 #b8791b,0 6px 14px rgba(0,0,0,.4);
+  }
+  .subtitle{font-size:15px;opacity:.9;line-height:1.5;max-width:300px;}
+  .btn{
+    background:var(--accent);
+    color:var(--ink);
+    border:none;
+    font-size:19px;
+    font-weight:700;
+    padding:14px 40px;
+    border-radius:999px;
+    cursor:pointer;
+    box-shadow:0 5px 0 #b8791b,0 8px 18px rgba(0,0,0,.35);
+    transition:transform .08s,box-shadow .08s;
+  }
+  .btn:active{transform:translateY(4px);box-shadow:0 1px 0 #b8791b,0 3px 8px rgba(0,0,0,.35);}
+  .score-big{font-size:64px;font-weight:800;text-shadow:0 3px 0 rgba(0,0,0,.3);}
+  .best{font-size:16px;opacity:.85;}
+  .medal{font-size:52px;}
+  #hud{
+    position:absolute;
+    top:16px;left:0;right:0;
+    text-align:center;
+    font-size:48px;
+    font-weight:800;
+    text-shadow:0 3px 0 rgba(0,0,0,.35);
+    pointer-events:none;
+    z-index:4;
+  }
+  .hint{font-size:13px;opacity:.7;margin-top:4px;}
+  .credit{position:absolute;bottom:8px;width:100%;text-align:center;font-size:11px;opacity:.5;z-index:3;pointer-events:none;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <div id="hud"></div>
+
+  <!-- Màn hình bắt đầu -->
+  <div class="overlay" id="startScreen">
+    <div class="title">CHIM BAY 🐤</div>
+    <div class="subtitle">Chạm màn hình hoặc nhấn <b>Space</b> để vỗ cánh.<br>Né các ống nước để ghi điểm!</div>
+    <button class="btn" id="startBtn">Chơi ngay</button>
+    <div class="best" id="startBest"></div>
+  </div>
+
+  <!-- Màn hình kết thúc -->
+  <div class="overlay hidden" id="overScreen">
+    <div class="medal" id="medal"></div>
+    <div style="font-size:20px;font-weight:600;">Kết thúc</div>
+    <div class="score-big" id="finalScore">0</div>
+    <div class="best" id="finalBest"></div>
+    <button class="btn" id="againBtn">Chơi lại</button>
+    <div class="hint">Chạm màn hình để chơi lại nhanh</div>
+  </div>
+
+  <div class="credit">Made with 🐤 · Flappy Bird clone</div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const hud = document.getElementById('hud');
+  const startScreen = document.getElementById('startScreen');
+  const overScreen = document.getElementById('overScreen');
+  const startBtn = document.getElementById('startBtn');
+  const againBtn = document.getElementById('againBtn');
+  const finalScore = document.getElementById('finalScore');
+  const finalBest = document.getElementById('finalBest');
+  const startBest = document.getElementById('startBest');
+  const medalEl = document.getElementById('medal');
+
+  // Kích thước logic cố định để game chạy đồng nhất mọi màn hình
+  const W = 440, H = 720;
+  let scale = 1, dpr = 1;
+
+  function resize(){
+    const rect = canvas.getBoundingClientRect();
+    dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---- Trạng thái game ----
+  const STATE = { READY:0, PLAY:1, OVER:2 };
+  let state = STATE.READY;
+
+  const GRAVITY = 0.45;
+  const FLAP = -7.6;
+  const PIPE_W = 66;
+  const GAP_MIN = 150;      // khoảng hở nhỏ nhất khi khó
+  const GAP_MAX = 190;      // khoảng hở lúc mới bắt đầu
+  const FLOOR_H = 96;
+
+  let bird, pipes, score, best, frame, speed, spawnEvery, groundX;
+
+  best = parseInt(localStorage.getItem('flappy_best') || '0', 10);
+
+  function reset(){
+    bird = { x: W*0.28, y: H*0.45, r: 15, vy: 0, rot: 0, flapT: 0 };
+    pipes = [];
+    score = 0;
+    frame = 0;
+    speed = 2.6;
+    spawnEvery = 96;      // số frame giữa các ống
+    groundX = 0;
+    hud.textContent = '';
+  }
+
+  function currentGap(){
+    // Khoảng hở thu hẹp dần theo điểm để tăng độ khó
+    const g = GAP_MAX - Math.min(score * 2.2, GAP_MAX - GAP_MIN);
+    return Math.max(GAP_MIN, g);
+  }
+
+  function spawnPipe(){
+    const gap = currentGap();
+    const margin = 60;
+    const top = margin + Math.random() * (H - FLOOR_H - gap - margin*2);
+    pipes.push({ x: W + PIPE_W, top: top, gap: gap, passed: false });
+  }
+
+  function flap(){
+    if(state === STATE.READY){ startGame(); return; }
+    if(state === STATE.OVER) return;
+    bird.vy = FLAP;
+    bird.flapT = 8;
+  }
+
+  function startGame(){
+    reset();
+    state = STATE.PLAY;
+    startScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+  }
+
+  function gameOver(){
+    state = STATE.OVER;
+    hud.textContent = '';
+    if(score > best){
+      best = score;
+      localStorage.setItem('flappy_best', String(best));
+    }
+    finalScore.textContent = score;
+    finalBest.textContent = '🏆 Kỷ lục: ' + best;
+    // Huy chương theo điểm
+    let m = '';
+    if(score >= 40) m = '🥇';
+    else if(score >= 20) m = '🥈';
+    else if(score >= 10) m = '🥉';
+    else m = '🐣';
+    medalEl.textContent = m;
+    overScreen.classList.remove('hidden');
+  }
+
+  // ---- Cập nhật vật lý ----
+  function update(){
+    frame++;
+
+    // Chim
+    bird.vy += GRAVITY;
+    bird.y += bird.vy;
+    if(bird.flapT > 0) bird.flapT--;
+    // Xoay theo vận tốc
+    const target = Math.max(-0.5, Math.min(1.4, bird.vy / 12));
+    bird.rot += (target - bird.rot) * 0.2;
+
+    // Sinh ống + tăng tốc dần
+    if(frame % Math.round(spawnEvery) === 0){
+      spawnPipe();
+    }
+    speed = 2.6 + Math.min(score * 0.04, 2.2);
+    spawnEvery = Math.max(72, 96 - score * 0.4);
+
+    // Di chuyển ống + tính điểm + va chạm
+    for(let i = pipes.length - 1; i >= 0; i--){
+      const p = pipes[i];
+      p.x -= speed;
+
+      // ghi điểm khi chim vượt qua giữa ống
+      if(!p.passed && p.x + PIPE_W < bird.x){
+        p.passed = true;
+        score++;
+        hud.textContent = score;
+      }
+
+      // va chạm
+      if(collide(bird, p)){
+        gameOver();
+        return;
+      }
+
+      if(p.x + PIPE_W < -10) pipes.splice(i, 1);
+    }
+
+    // Chạm đất / trần
+    if(bird.y + bird.r >= H - FLOOR_H){
+      bird.y = H - FLOOR_H - bird.r;
+      gameOver();
+      return;
+    }
+    if(bird.y - bird.r < 0){
+      bird.y = bird.r;
+      bird.vy = 0;
+    }
+
+    // đất cuộn
+    groundX = (groundX - speed) % 24;
+  }
+
+  function collide(b, p){
+    const bx = b.x, by = b.y, r = b.r * 0.85;
+    // trong phạm vi ngang của ống?
+    if(bx + r > p.x && bx - r < p.x + PIPE_W){
+      const gapTop = p.top;
+      const gapBottom = p.top + p.gap;
+      if(by - r < gapTop || by + r > gapBottom){
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ---- Vẽ ----
+  function drawBackground(){
+    // trời
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#4ec0e0');
+    g.addColorStop(0.6,'#8fd6ea');
+    g.addColorStop(1,'#c9e9ac');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+
+    // mây (tĩnh, nhẹ nhàng)
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    cloud(70, 130, 34);
+    cloud(320, 90, 42);
+    cloud(200, 210, 28);
+  }
+  function cloud(x,y,r){
+    ctx.beginPath();
+    ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.arc(x+r,y+6,r*0.8,0,Math.PI*2);
+    ctx.arc(x-r,y+8,r*0.7,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  function drawPipe(p){
+    const gapTop = p.top;
+    const gapBottom = p.top + p.gap;
+    const grad = ctx.createLinearGradient(p.x,0,p.x+PIPE_W,0);
+    grad.addColorStop(0,'#5cb64a');
+    grad.addColorStop(0.5,'#7ed957');
+    grad.addColorStop(1,'#4a9e38');
+    ctx.fillStyle = grad;
+    ctx.strokeStyle = '#3c7a2e';
+    ctx.lineWidth = 3;
+
+    // thân trên
+    roundRectPath(p.x, 0, PIPE_W, gapTop, 4); ctx.fill(); ctx.stroke();
+    // miệng trên
+    roundRectPath(p.x-5, gapTop-26, PIPE_W+10, 26, 6); ctx.fill(); ctx.stroke();
+    // thân dưới
+    roundRectPath(p.x, gapBottom, PIPE_W, H - FLOOR_H - gapBottom, 4); ctx.fill(); ctx.stroke();
+    // miệng dưới
+    roundRectPath(p.x-5, gapBottom, PIPE_W+10, 26, 6); ctx.fill(); ctx.stroke();
+  }
+
+  function roundRectPath(x,y,w,h,r){
+    if(h <= 0) { ctx.beginPath(); return; }
+    r = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function drawGround(){
+    const y = H - FLOOR_H;
+    ctx.fillStyle = '#ded895';
+    ctx.fillRect(0, y, W, FLOOR_H);
+    // viền cỏ
+    ctx.fillStyle = '#7ec850';
+    ctx.fillRect(0, y, W, 14);
+    ctx.fillStyle = '#5cb64a';
+    for(let x = groundX; x < W; x += 24){
+      ctx.fillRect(x, y+10, 12, 6);
+    }
+    // sọc đất
+    ctx.fillStyle = '#cfc77d';
+    for(let x = groundX*0.6; x < W; x += 40){
+      ctx.fillRect(x, y+22, 24, FLOOR_H-22);
+    }
+  }
+
+  function drawBird(){
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.rotate(bird.rot);
+    const r = bird.r;
+
+    // thân
+    ctx.fillStyle = '#f9c22e';
+    ctx.strokeStyle = '#c8901a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r+3, r, 0, 0, Math.PI*2);
+    ctx.fill(); ctx.stroke();
+
+    // bụng
+    ctx.fillStyle = '#ffe08a';
+    ctx.beginPath();
+    ctx.ellipse(2, 5, r-2, r-5, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // cánh (vẫy khi flap)
+    const wingUp = bird.flapT > 0;
+    ctx.fillStyle = '#f2ab1e';
+    ctx.strokeStyle = '#c8901a';
+    ctx.beginPath();
+    ctx.ellipse(-3, wingUp? -4 : 4, 9, 6, wingUp? -0.5 : 0.4, 0, Math.PI*2);
+    ctx.fill(); ctx.stroke();
+
+    // mắt
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(r-2, -5, 6, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(r, -5, 3, 0, Math.PI*2); ctx.fill();
+
+    // mỏ
+    ctx.fillStyle = '#f37021';
+    ctx.strokeStyle = '#c8560f';
+    ctx.beginPath();
+    ctx.moveTo(r+2, -1);
+    ctx.lineTo(r+14, 2);
+    ctx.lineTo(r+2, 6);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function render(){
+    drawBackground();
+    for(const p of pipes) drawPipe(p);
+    drawGround();
+    drawBird();
+  }
+
+  // ---- Vòng lặp ----
+  function loop(){
+    if(state === STATE.PLAY){
+      update();
+    }
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Điều khiển ----
+  function onInput(e){
+    if(e.type === 'keydown'){
+      if(e.code === 'Space' || e.code === 'ArrowUp'){
+        e.preventDefault();
+        if(state === STATE.OVER){ startGame(); return; }
+        flap();
+      }
+      return;
+    }
+    e.preventDefault();
+    if(state === STATE.OVER){ startGame(); return; }
+    flap();
+  }
+
+  window.addEventListener('keydown', onInput);
+  canvas.addEventListener('pointerdown', onInput);
+  startBtn.addEventListener('click', function(e){ e.stopPropagation(); startGame(); });
+  againBtn.addEventListener('click', function(e){ e.stopPropagation(); startGame(); });
+
+  // Hiển thị kỷ lục ở màn bắt đầu
+  startBest.textContent = best > 0 ? '🏆 Kỷ lục: ' + best : '';
+
+  loop();
+})();
+</script>
+</body>
+</html>
