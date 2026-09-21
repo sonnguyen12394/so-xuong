@@ -129,7 +129,7 @@
   const PIPE_W = 66;
   const GRAVITY = 0.45;
   const FLAP = -7.6;
-  const GAP_MIN = 155, GAP_MAX = 200;
+  const GAP_MIN = 162, GAP_MAX = 200;
 
   function resize(){
     const dpr = window.devicePixelRatio || 1;
@@ -187,6 +187,7 @@
   let bird, pipes, items, particles, popups;
   let score, coinBonus, combo, comboTimer, frame, speed, spawnEvery, groundX;
   let curLevel, lastLevel;
+  let lastGapCenter, lastWasMoving;
   let shakeT, shakeMag, flashT, flashColor, overGuard;
   let inv, invT, slow, slowT, shield;
   let stars;
@@ -205,6 +206,7 @@
     score = 0; coinBonus = 0; combo = 1; comboTimer = 0;
     frame = 0; speed = 2.6; spawnEvery = 100; groundX = 0;
     curLevel = 1; lastLevel = 1;
+    lastGapCenter = H*0.42; lastWasMoving = false;   // khe đầu gần vị trí chim xuất phát
     shakeT = 0; shakeMag = 0; flashT = 0; overGuard = 0;
     inv = false; invT = 0; slow = false; slowT = 0; shield = false;
     hudScore.textContent = ''; hudCombo.textContent = '';
@@ -214,17 +216,39 @@
   // Số giây đã sống trong ván hiện tại (độ khó tăng theo thời gian này)
   function elapsedSec(){ return state===READY ? 0 : frame/60; }
   function currentGap(){
-    // khe hở thu hẹp dần theo thời gian: 200 -> 150 trong ~55 giây
-    return Math.max(GAP_MIN, GAP_MAX - Math.min(elapsedSec()*0.9, GAP_MAX-GAP_MIN));
+    // khe hở thu hẹp dần theo thời gian: 200 -> 162 trong ~50 giây rồi giữ nguyên
+    return Math.max(GAP_MIN, GAP_MAX - Math.min(elapsedSec()*0.75, GAP_MAX-GAP_MIN));
   }
   function spawnPipe(){
     const gap = currentGap();
-    const margin = 64;
-    const top = margin + Math.random()*(H - FLOOR_H - gap - margin*2);
     const secs = elapsedSec();
-    const moving = secs >= 20 && Math.random() < Math.min(0.12 + (secs-20)*0.008, 0.4);
+    const margin = 60;
+    // vùng cho phép của TÂM khe
+    const minC = margin + gap/2;
+    const maxC = (H - FLOOR_H) - margin - gap/2;
+
+    // ống di chuyển: hiền hơn, không ra 2 cái liền nhau
+    const moving = !lastWasMoving && secs >= 22 &&
+                   Math.random() < Math.min(0.10 + (secs-22)*0.006, 0.30);
+    const amp = moving ? (16 + Math.random()*10) : 0;   // biên độ nhỏ, tối đa ~26px
+
+    // GIỚI HẠN chênh lệch tâm khe so với ống trước để LUÔN bay tới kịp.
+    // Khoảng cách ngang giữa 2 ống = speed * spawnEvery (px); chim đủ sức đổi
+    // độ cao ~ 0.5px mỗi px ngang. Trừ hao biên độ dao động của cả 2 ống.
+    const spacing = speed * spawnEvery;
+    let maxDelta = Math.min(200, spacing * 0.52) - amp - (lastWasMoving ? 20 : 0);
+    maxDelta = Math.max(70, maxDelta);
+    let lo = Math.max(minC, lastGapCenter - maxDelta);
+    let hi = Math.min(maxC, lastGapCenter + maxDelta);
+    if(hi < lo){ const m=(lo+hi)/2; lo=hi=Math.max(minC,Math.min(maxC,m)); }
+    const center = lo + Math.random()*(hi - lo);
+    const top = center - gap/2;
+
+    lastGapCenter = center;
+    lastWasMoving = moving;
+
     const p = { x: W + PIPE_W, top, gap, passed:false,
-                moving, baseTop:top, phase:Math.random()*Math.PI*2, amp: 26 + Math.random()*22 };
+                moving, baseTop:top, phase:Math.random()*Math.PI*2, amp };
     pipes.push(p);
 
     // Vật phẩm trong khe
@@ -312,10 +336,10 @@
                        color:'hsl('+(frame*20%360)+',90%,60%)', g:0 });
     }
 
-    // độ khó tăng dần theo THỜI GIAN sống sót
+    // độ khó tăng dần theo THỜI GIAN sống sót, rồi CHẶN ở mức khó-nhưng-qua-được
     const secs = frame/60;
-    speed = 2.6 + Math.min(secs*0.045, 2.6);           // 2.6 -> 5.2 trong ~58s
-    spawnEvery = Math.max(70, 100 - secs*0.55);          // ống ra dày hơn theo thời gian
+    speed = 2.6 + Math.min(secs*0.04, 2.4);            // 2.6 -> 5.0 trong ~60s rồi giữ
+    spawnEvery = Math.max(76, 100 - secs*0.5);          // khoảng cách ống không quá sát
     // "MÀN" mới mỗi 12 giây -> báo hiệu độ khó lên
     curLevel = 1 + Math.floor(secs/12);
     if(curLevel > lastLevel){
