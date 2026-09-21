@@ -186,6 +186,7 @@
   let state = READY;
   let bird, pipes, items, particles, popups;
   let score, coinBonus, combo, comboTimer, frame, speed, spawnEvery, groundX;
+  let curLevel, lastLevel;
   let shakeT, shakeMag, flashT, flashColor, overGuard;
   let inv, invT, slow, slowT, shield;
   let stars;
@@ -203,20 +204,25 @@
     pipes = []; items = []; particles = []; popups = [];
     score = 0; coinBonus = 0; combo = 1; comboTimer = 0;
     frame = 0; speed = 2.6; spawnEvery = 100; groundX = 0;
+    curLevel = 1; lastLevel = 1;
     shakeT = 0; shakeMag = 0; flashT = 0; overGuard = 0;
     inv = false; invT = 0; slow = false; slowT = 0; shield = false;
     hudScore.textContent = ''; hudCombo.textContent = '';
   }
 
   // ---------- Spawn ----------
+  // Số giây đã sống trong ván hiện tại (độ khó tăng theo thời gian này)
+  function elapsedSec(){ return state===READY ? 0 : frame/60; }
   function currentGap(){
-    return Math.max(GAP_MIN, GAP_MAX - Math.min(score*1.8, GAP_MAX-GAP_MIN));
+    // khe hở thu hẹp dần theo thời gian: 200 -> 150 trong ~55 giây
+    return Math.max(GAP_MIN, GAP_MAX - Math.min(elapsedSec()*0.9, GAP_MAX-GAP_MIN));
   }
   function spawnPipe(){
     const gap = currentGap();
     const margin = 64;
     const top = margin + Math.random()*(H - FLOOR_H - gap - margin*2);
-    const moving = score >= 14 && Math.random() < 0.35;
+    const secs = elapsedSec();
+    const moving = secs >= 20 && Math.random() < Math.min(0.12 + (secs-20)*0.008, 0.4);
     const p = { x: W + PIPE_W, top, gap, passed:false,
                 moving, baseTop:top, phase:Math.random()*Math.PI*2, amp: 26 + Math.random()*22 };
     pipes.push(p);
@@ -306,10 +312,20 @@
                        color:'hsl('+(frame*20%360)+',90%,60%)', g:0 });
     }
 
-    // sinh ống + tăng tốc
+    // độ khó tăng dần theo THỜI GIAN sống sót
+    const secs = frame/60;
+    speed = 2.6 + Math.min(secs*0.045, 2.6);           // 2.6 -> 5.2 trong ~58s
+    spawnEvery = Math.max(70, 100 - secs*0.55);          // ống ra dày hơn theo thời gian
+    // "MÀN" mới mỗi 12 giây -> báo hiệu độ khó lên
+    curLevel = 1 + Math.floor(secs/12);
+    if(curLevel > lastLevel){
+      lastLevel = curLevel;
+      addScorePopup(W/2, H*0.32, 'MÀN '+curLevel+'!', '#ff8c42');
+      flashT = 6; flashColor = '#ffd6a0'; shakeT = 8; shakeMag = 5;
+      sfx.power();
+    }
+    // sinh ống
     if(frame % Math.round(spawnEvery) === 0) spawnPipe();
-    speed = 2.6 + Math.min(score*0.045, 2.6);
-    spawnEvery = Math.max(70, 100 - score*0.5);
 
     const eff = speed * ts;
 
@@ -434,13 +450,13 @@
   function mix(c1,c2,t){ return [lerp(c1[0],c2[0],t),lerp(c1[1],c2[1],t),lerp(c1[2],c2[2],t)]; }
   function rgb(c){ return 'rgb('+(c[0]|0)+','+(c[1]|0)+','+(c[2]|0)+')'; }
   function skyColors(){
-    const p = Math.min((state===READY?0:score)/12, 2);
+    const p = Math.min(elapsedSec()/28, 2);   // hoàng hôn ~28s, đêm ~56s
     let a,b;
     if(p<1){ a=SKY.day; b=SKY.sunset; } else { a=SKY.sunset; b=SKY.night; }
     const t = p<1? p : p-1;
     return [ mix(a[0],b[0],t), mix(a[1],b[1],t), mix(a[2],b[2],t) ];
   }
-  function nightAmount(){ return Math.max(0, Math.min(1, ((state===READY?0:score)/12 - 1))); }
+  function nightAmount(){ return Math.max(0, Math.min(1, (elapsedSec()/28 - 1))); }
 
   // ---------- Vẽ ----------
   function drawBackground(){
@@ -603,9 +619,17 @@
     ctx.globalAlpha=1;
   }
   function drawPowerBars(){
-    // thanh thời gian sức mạnh góc trên trái
+    // nhãn MÀN (level) góc trên trái
     let yy=16;
-    ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.font='14px serif';
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.font='bold 15px Segoe UI, sans-serif';
+    const lvTxt = 'MÀN '+curLevel;
+    ctx.fillStyle='rgba(0,0,0,.28)'; roundRectPath(12,yy,74,20,8); ctx.fill();
+    ctx.fillStyle='#ffd6a0'; ctx.strokeStyle='rgba(0,0,0,.5)'; ctx.lineWidth=3;
+    ctx.strokeText(lvTxt,18,yy+10); ctx.fillText(lvTxt,18,yy+10);
+    yy+=26;
+    // thanh thời gian sức mạnh
+    ctx.font='14px serif';
     function bar(icon,frac,col){
       ctx.fillStyle='rgba(0,0,0,.25)'; roundRectPath(12,yy,88,16,8); ctx.fill();
       ctx.fillStyle=col; roundRectPath(12,yy,Math.max(16,88*frac),16,8); ctx.fill();
