@@ -5999,7 +5999,24 @@ function modalSrCat(thoId,cat){
 }
 function srSetKy(ky,thoId){_srKy=ky;_srRef=0;_srTho=thoId||_srTho;modalThoChiTiet(thoId||_srTho);}
 function srNav(dir,thoId){if(_srKy==='all')return;const P=perRange(_srKy,_srRef);if(dir>0&&P.atNow)return;_srRef=perNav(_srKy,_srRef,dir);_srTho=thoId||_srTho;modalThoChiTiet(thoId||_srTho);}
-function srSetLoai(l){_srLoai=l;const d=(el('sr_ngay')||{}).value||undefined;modalSoRieng(_srTho,_srId,d);}
+/* Đổi Thu ↔ Chi NGAY TRÊN FORM (không vẽ lại) — giữ nguyên số tiền / ghi chú / ngày đang nhập.
+   Khi đang SỬA khoản cũ: hiện rõ "đổi Thu → Chi", bấm Lưu mới ghi. */
+function srSetLoai(l){
+  _srLoai=l;
+  const bt=el('sr_b_thu'),bc=el('sr_b_chi');
+  if(!bt||!bc){const d=(el('sr_ngay')||{}).value||undefined;return modalSoRieng(_srTho,_srId,d);}
+  bt.className='btn '+(l==='thu'?'btn-sage':'btn-ghost')+' btn-sm';
+  bc.className='btn '+(l==='chi'?'btn-primary':'btn-ghost')+' btn-sm';
+  const t=getTho(_srTho),r=_srId?srList().find(x=>x.id===_srId):null;
+  const h=document.querySelector('#sheet .sheet-h b');
+  if(h)h.textContent=(r?'Sửa · ':'')+(l==='thu'?'Thu ngoài':'Chi ngoài')+(t?' — '+t.ten:'');
+  const dg=el('sr_dg'); if(dg)dg.placeholder=l==='thu'?'VD: bán đồ, ai đó trả nợ…':'VD: cà phê, mua đồ, tiền chợ…';
+  const n=el('sr_doiloai');
+  if(n){const doi=r&&r.loai!==l;n.style.display=doi?'':'none';
+    if(doi)n.innerHTML='🔁 Sẽ đổi khoản này từ <b>'+(r.loai==='thu'?'Thu ngoài':'Chi ngoài')+'</b> sang <b>'+(l==='thu'?'Thu ngoài':'Chi ngoài')+'</b> — bấm <b>Lưu thay đổi</b> để ghi.';}
+  const c=el('sr_com'); if(c)c.style.display=(r&&r.loai==='chi'&&l==='chi')?'':'none';
+  _sheetDirty=true;
+}
 function modalSoRieng(thoId,id,defNgay){
   _srTho=thoId||null; _srId=id||null;
   const t=getTho(thoId);
@@ -6013,15 +6030,16 @@ function modalSoRieng(thoId,id,defNgay){
   const title=(r?'Sửa · ':'')+(_srLoai==='thu'?'Thu ngoài':'Chi ngoài')+(t?' — '+t.ten:'');
   openSheet(title,`
     <div style="display:flex;gap:6px;margin-bottom:12px">
-      <button class="btn ${_srLoai==='thu'?'btn-sage':'btn-ghost'} btn-sm" style="flex:1" onclick="srSetLoai('thu')">📥 Thu ngoài</button>
-      <button class="btn ${_srLoai==='chi'?'btn-primary':'btn-ghost'} btn-sm" style="flex:1" onclick="srSetLoai('chi')">📤 Chi ngoài</button>
+      <button id="sr_b_thu" class="btn ${_srLoai==='thu'?'btn-sage':'btn-ghost'} btn-sm" style="flex:1" onclick="srSetLoai('thu')">📥 Thu ngoài</button>
+      <button id="sr_b_chi" class="btn ${_srLoai==='chi'?'btn-primary':'btn-ghost'} btn-sm" style="flex:1" onclick="srSetLoai('chi')">📤 Chi ngoài</button>
     </div>
     <div class="field"><label>Số tiền</label><input type="text" inputmode="numeric" class="sep" id="sr_tien" autofocus value="${tien}" placeholder="0" onfocus="this.select()" style="font-size:17px"></div>
     <div class="field"><label>Ghi gì</label><input id="sr_dg" value="${escHtml(dg)}" placeholder="${_srLoai==='thu'?'VD: bán đồ, ai đó trả nợ…':'VD: cà phê, mua đồ, tiền chợ…'}"></div>
     <div class="field"><label>Ngày</label><input type="date" id="sr_ngay" value="${ngayStr}" max="${maxNgay}"${(!r&&defNgay)?' oninput="gbsSetNgay(this.value)" onchange="gbsSetNgay(this.value)"':''}></div>
+    <div id="sr_doiloai" class="hint" style="display:none;margin-bottom:10px;padding:8px 10px;border-radius:10px;background:rgba(214,158,46,.14);color:inherit"></div>
     <div class="hint" style="margin-bottom:12px">Khoản thu/chi <b>ngoài</b> của riêng người này — KHÔNG đụng tới tiền trong két, Lãi tạm hay Chốt sổ của xưởng. Lương xưởng đã tự hiện thành các dòng “Trả lương / Ứng” bên dưới, không cần nhập lại ở đây.</div>
     ${r?`<button class="btn btn-primary" style="width:100%" onclick="submitSoRieng(false)">Lưu thay đổi</button>`:`<div class="act-grid"><button class="btn btn-primary" onclick="submitSoRieng(true)">＋ Ghi & nhập tiếp</button><button class="btn btn-ghost" onclick="submitSoRieng(false)">Ghi rồi đóng</button></div>`}
-    ${(r&&r.loai==='chi')?`<button class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px" onclick="modalChuyenSangCom('${r.id}')">🍚 Đưa vào Cơm, bồi dưỡng thợ · tính vào xưởng</button>`:''}
+    ${(r&&r.loai==='chi')?`<button id="sr_com" class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px${_srLoai==='chi'?'':';display:none'}" onclick="modalChuyenSangCom('${r.id}')">🍚 Đưa vào Cơm, bồi dưỡng thợ · tính vào xưởng</button>`:''}
     ${r?`<button class="btn btn-danger btn-sm" style="width:100%;margin-top:8px" onclick="xoaSoRieng('${r.id}')">🗑 Xóa khoản này</button>`:''}
   `);
 }
@@ -6029,10 +6047,11 @@ function submitSoRieng(keepOpen){try{
   const s=numVal('sr_tien'); if(s<=0)return toast('Nhập số tiền.',true);
   const dg=(el('sr_dg')&&el('sr_dg').value||'').trim();
   const nv=el('sr_ngay')&&el('sr_ngay').value; const ts=nv?new Date(nv+'T12:00:00').getTime():now();
+  const r0=_srId?srList().find(x=>x.id===_srId):null; const doiLoai=!!(r0&&r0.loai!==_srLoai);
   if(_srId)soRiengSua({id:_srId,loai:_srLoai,soTien:s,dienGiai:dg,ngay:ts});
   else soRiengThem({thoId:_srTho,loai:_srLoai,soTien:s,dienGiai:dg,ngay:ts});
   if(keepOpen&&!_srId){ toast(_srLoai==='thu'?'Đã ghi thu — nhập tiếp':'Đã ghi chi — nhập tiếp'); srReopen(nv); }
-  else { closeSheet();toast(_srId?'Đã lưu.':(_srLoai==='thu'?'Đã ghi tiền vào sổ riêng.':'Đã ghi tiền ra sổ riêng.')); }
+  else { closeSheet();toast(_srId?(doiLoai?('Đã đổi sang '+(_srLoai==='thu'?'Thu ngoài.':'Chi ngoài.')):'Đã lưu.'):(_srLoai==='thu'?'Đã ghi tiền vào sổ riêng.':'Đã ghi tiền ra sổ riêng.')); }
 }catch(e){toast(e.message,true);}}
 /* Mở lại sổ riêng của CÙNG thợ để nhập tiếp: giữ loại (thu/chi) + ngày, xóa số tiền, focus sẵn. */
 function srReopen(dstr){
